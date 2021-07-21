@@ -1,3 +1,9 @@
+const port = (process.env.PORT = process.env.SNYK_PORT = '12345');
+const BASE_API = '/api/v1';
+process.env.SNYK_API = 'http://localhost:' + port + BASE_API;
+process.env.SNYK_HOST = 'http://localhost:' + port;
+process.env.LOG_LEVEL = '0';
+
 import { test } from 'tap';
 import { exec } from 'child_process';
 import { config as userConfig } from '../../src/lib/user-config';
@@ -12,11 +18,6 @@ import { chdirWorkspaces } from './workspace-helper';
 const { test, only } = tap;
 (tap as any).runOnly = false; // <- for debug. set to true, and replace a test to only(..)
 
-const port = (process.env.PORT = process.env.SNYK_PORT = '12345');
-const BASE_API = '/api/v1';
-process.env.SNYK_API = 'http://localhost:' + port + BASE_API;
-process.env.SNYK_HOST = 'http://localhost:' + port;
-process.env.LOG_LEVEL = '0';
 const apiKey = '123456789';
 let oldkey;
 let oldendpoint;
