@@ -52,6 +52,7 @@
   },
   "devDependencies": {
     "cross-spawn": "^6.0.5",
-    "fs-extra": "^9.1.0"
+    "fs-extra": "^9.1.0",
+    "strip-ansi": "^5.2.0"
   }
 }

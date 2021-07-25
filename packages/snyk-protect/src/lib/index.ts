@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import stripAnsi from 'strip-ansi';
 import { extractPatchMetadata } from './snyk-file';
 import { applyPatchToFile } from './patch';
 import { findPhysicalModules } from './explore-node-modules';
@@ -13,10 +14,13 @@ import { getAllPatches } from './fetch-patches';
 import { sendAnalytics } from './analytics';
 
 async function protect(projectFolderPath: string) {
-  // Handle runs with flags. Fourth arg would be a flag, if used.
-  const rawArgs = process.argv.slice(3);
-  if (rawArgs.length > 0) {
-    runProtectWithFlag(rawArgs);
+  // Handle runs with flags
+  if (process.argv.includes('--help')) {
+    getHelp();
+    return;
+  }
+  if (process.argv.includes('--version')) {
+    getVersion();
     return;
   }
 
@@ -99,29 +103,12 @@ async function protect(projectFolderPath: string) {
   });
 }
 
-// Either run with --version or --help
-function runProtectWithFlag(args: string[]) {
-  const flag = args[0];
-  if (args.length > 1 || (flag !== '--version' && flag !== '--help')) {
-    console.log('Unsupported flag or flags used.');
-    return;
+export function getHelp(): string {
+  const fileName = path.resolve(__dirname, './help/help.txt');
+  const file = fs.readFileSync(fileName, 'utf8');
+  if (typeof process.env.NO_COLOR !== 'undefined' || !process.stdout.isTTY) {
+    return stripAnsi(file);
   }
-
-  if (flag === '--version') {
-    console.log(getVersion());
-  }
-
-  if (flag === '--help') {
-    console.log(help());
-  }
-}
-
-export default protect;
-
-const FILENAME = 'packages/snyk-protect/src/lib/help/help.txt';
-
-export function help(): string {
-  const file = fs.readFileSync(FILENAME, 'utf8');
   return file;
 }
 
@@ -133,3 +120,5 @@ export function getVersion() {
   const packageJson = JSON.parse(rawData);
   return packageJson.version;
 }
+
+export default protect;
