@@ -1,6 +1,8 @@
 import { fakeServer } from '../../acceptance/fake-server';
 import { runSnykCLI } from '../util/runSnykCLI';
 
+jest.setTimeout(1000 * 30);
+
 describe('config', () => {
   let server: ReturnType<typeof fakeServer>;
   const port = process.env.PORT || process.env.SNYK_PORT || '12345';
@@ -15,7 +17,7 @@ describe('config', () => {
 
   beforeAll(() => {
     server = fakeServer(baseURL, '123456789');
-    return new Promise((resolve) => server.listen(port, resolve));
+    return new Promise<void>((resolve) => server.listen(port, resolve));
   });
 
   afterEach(() => {
@@ -23,7 +25,7 @@ describe('config', () => {
     server.restore();
   });
 
-  afterAll(() => new Promise(server.close));
+  afterAll(() => new Promise<void>(server.close));
 
   it('loads API_REST_URL from config key if set', async () => {
     const env = {

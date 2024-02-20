@@ -4,22 +4,44 @@ import * as fs from 'fs';
 import * as http from 'http';
 import * as https from 'https';
 import * as path from 'path';
+import * as net from 'net';
 import { getFixturePath } from '../jest/util/getFixturePath';
+import * as os from 'os';
 
 const featureFlagDefaults = (): Map<string, boolean> => {
   return new Map([
     ['cliFailFast', false],
     ['iacIntegratedExperience', false],
+    ['containerCliAppVulnsEnabled', true],
   ]);
 };
+
+export function getFirstIPv4Address(): string {
+  let ipaddress = '';
+
+  const interfaces = os.networkInterfaces();
+  for (const [, group] of Object.entries(interfaces)) {
+    if (group) {
+      for (const inter of group) {
+        if (inter && inter.family == 'IPv4' && inter.address != '127.0.0.1') {
+          ipaddress = inter.address;
+          break;
+        }
+      }
+    }
+  }
+  return ipaddress;
+}
 
 export type FakeServer = {
   getRequests: () => express.Request[];
   popRequest: () => express.Request;
   popRequests: (num: number) => express.Request[];
-  setDepGraphResponse: (next: Record<string, unknown>) => void;
+  setCustomResponse: (next: Record<string, unknown>) => void;
   setNextResponse: (r: any) => void;
   setNextStatusCode: (c: number) => void;
+  setStatusCode: (c: number) => void;
+  setStatusCodes: (c: number[]) => void;
   setFeatureFlag: (featureFlag: string, enabled: boolean) => void;
   unauthorizeAction: (action: string, reason?: string) => void;
   listen: (port: string | number, callback: () => void) => void;
@@ -38,14 +60,20 @@ export const fakeServer = (basePath: string, snykToken: string): FakeServer => {
   let requests: express.Request[] = [];
   let featureFlags: Map<string, boolean> = featureFlagDefaults();
   let unauthorizedActions = new Map();
+  // the status code to return for the next request, overriding statusCode
   let nextStatusCode: number | undefined = undefined;
+  // the status code to return for all the requests
+  let statusCode: number | undefined = undefined;
+  let statusCodes: number[] = [];
   let nextResponse: any = undefined;
-  let depGraphResponse: Record<string, unknown> | undefined = undefined;
+  let customResponse: Record<string, unknown> | undefined = undefined;
   let server: http.Server | undefined = undefined;
+  const sockets = new Set();
 
   const restore = () => {
+    statusCode = undefined;
     requests = [];
-    depGraphResponse = undefined;
+    customResponse = undefined;
     featureFlags = featureFlagDefaults();
     unauthorizedActions = new Map();
   };
@@ -62,8 +90,8 @@ export const fakeServer = (basePath: string, snykToken: string): FakeServer => {
     return requests.splice(requests.length - num, num);
   };
 
-  const setDepGraphResponse = (next: typeof depGraphResponse) => {
-    depGraphResponse = next;
+  const setCustomResponse = (next: typeof customResponse) => {
+    customResponse = next;
   };
 
   const setNextResponse = (response: string | Record<string, unknown>) => {
@@ -76,6 +104,14 @@ export const fakeServer = (basePath: string, snykToken: string): FakeServer => {
 
   const setNextStatusCode = (code: number) => {
     nextStatusCode = code;
+  };
+
+  const setStatusCode = (code: number) => {
+    statusCode = code;
+  };
+
+  const setStatusCodes = (codes: number[]) => {
+    statusCodes = codes;
   };
 
   const setFeatureFlag = (featureFlag: string, enabled: boolean) => {
@@ -103,18 +139,20 @@ export const fakeServer = (basePath: string, snykToken: string): FakeServer => {
 
   [basePath + '/verify/callback', basePath + '/verify/token'].map((url) => {
     app.post(url, (req, res) => {
-      if (req.body.api === snykToken) {
-        return res.send({
-          ok: true,
-          api: snykToken,
-        });
-      }
+      if (req.header('Authorization') === undefined) {
+        if (req.body.api === snykToken) {
+          return res.send({
+            ok: true,
+            api: snykToken,
+          });
+        }
 
-      if (req.body.token) {
-        return res.send({
-          ok: true,
-          api: snykToken,
-        });
+        if (req.body.token) {
+          return res.send({
+            ok: true,
+            api: snykToken,
+          });
+        }
       }
 
       res.status(401);
@@ -124,11 +162,16 @@ export const fakeServer = (basePath: string, snykToken: string): FakeServer => {
     });
   });
 
+  app.get('/login', (req, res) => {
+    res.status(200);
+    res.send('Test Authenticated!');
+  });
+
   app.use((req, res, next) => {
     if (
       req.url?.includes('/iac-org-settings') ||
       req.url?.includes('/cli-config/feature-flags/') ||
-      (!nextResponse && !nextStatusCode)
+      (!nextResponse && !nextStatusCode && !statusCode)
     ) {
       return next();
     }
@@ -138,7 +181,10 @@ export const fakeServer = (basePath: string, snykToken: string): FakeServer => {
       const code = nextStatusCode;
       nextStatusCode = undefined;
       res.status(code);
+    } else if (statusCode) {
+      res.status(statusCode);
     }
+
     res.send(response);
   });
 
@@ -194,8 +240,14 @@ export const fakeServer = (basePath: string, snykToken: string): FakeServer => {
       return next();
     }
 
-    if (depGraphResponse) {
-      res.send(depGraphResponse);
+    const statusCode = statusCodes.shift();
+    if (statusCode && statusCode !== 200) {
+      res.sendStatus(statusCode);
+      return next();
+    }
+
+    if (customResponse) {
+      res.send(customResponse);
       return next();
     }
 
@@ -267,6 +319,11 @@ export const fakeServer = (basePath: string, snykToken: string): FakeServer => {
         userMessage:
           'Org missing-org was not found or you may not have the correct permissions',
       });
+      return;
+    }
+
+    if (customResponse) {
+      res.send(customResponse);
       return;
     }
 
@@ -490,6 +547,45 @@ export const fakeServer = (basePath: string, snykToken: string): FakeServer => {
     res.status(200).send({});
   });
 
+  app.post(
+    basePath.replace('v1', 'hidden') + '/orgs/:org/sbom',
+    express.json(),
+    (req, res) => {
+      const depGraph: void | Record<string, any> = req.body.depGraph;
+      const depGraphs: void | Record<string, any>[] = req.body.depGraphs;
+      const tools: void | Record<string, any>[] = req.body.tools;
+      let bom: Record<string, unknown> = { bomFormat: 'CycloneDX' };
+
+      if (Array.isArray(depGraphs) && req.body.subject) {
+        // Return a fixture of an all-projects SBOM.
+        bom = {
+          ...bom,
+          metadata: { component: { name: req.body.subject.name } },
+          components: depGraphs
+            .flatMap(({ pkgs }) => pkgs)
+            .map(({ info: { name } }) => ({ name })),
+        };
+      }
+
+      if (depGraph) {
+        bom = {
+          ...bom,
+          metadata: { component: { name: depGraph.pkgs[0]?.info.name } },
+          components: depGraph.pkgs.map(({ info: { name } }) => ({ name })),
+        };
+      }
+
+      if (Array.isArray(tools)) {
+        bom.metadata = {
+          ...(bom.metadata as any),
+          tools: [...tools, { name: 'fake-server' }],
+        };
+      }
+
+      res.status(200).send(bom);
+    },
+  );
+
   app.get(basePath + '/download/driftctl', (req, res) => {
     const fixturePath = getFixturePath('iac');
     const path1 = path.join(fixturePath, 'drift', 'download-test.sh');
@@ -497,9 +593,42 @@ export const fakeServer = (basePath: string, snykToken: string): FakeServer => {
     res.send(body);
   });
 
+  // Post state mapping artifact
+  app.post(
+    basePath.replace('v1', 'hidden') +
+      '/orgs/:orgId/cloud/mappings_artifact/tfstate',
+    (req, res) => {
+      const { orgId } = req.params;
+      const artifact = path.join(
+        getFixturePath('iac'),
+        'capture',
+        orgId + '-artifact.json',
+      );
+      fs.writeFileSync(artifact, JSON.stringify(req.body));
+      res.status(201).send({});
+    },
+  );
+
+  app.post(basePath.replace('/v1', '') + '/oauth2/token', (req, res) => {
+    const fake_oauth_token =
+      '{"access_token":"access_token_value","token_type":"b","expiry":"3023-12-20T08:49:15.504539Z"}';
+
+    // client credentials grant: expecting client id = a and client secret = b
+    if (req.headers.authorization?.includes('Basic YTpi')) {
+      res.status(200).send(fake_oauth_token);
+      return;
+    }
+
+    res.status(401).send({});
+  });
+
   const listenPromise = (port: string | number) => {
     return new Promise<void>((resolve) => {
       server = http.createServer(app).listen(Number(port), resolve);
+
+      server?.on('connection', (socket) => {
+        sockets.add(socket);
+      });
     });
   };
 
@@ -535,6 +664,11 @@ export const fakeServer = (basePath: string, snykToken: string): FakeServer => {
   };
 
   const close = (callback: () => void) => {
+    for (const socket of sockets) {
+      (socket as net.Socket)?.destroy();
+      sockets.delete(socket);
+    }
+
     closePromise().then(callback);
   };
 
@@ -550,9 +684,11 @@ export const fakeServer = (basePath: string, snykToken: string): FakeServer => {
     getRequests,
     popRequest,
     popRequests,
-    setDepGraphResponse,
+    setCustomResponse: setCustomResponse,
     setNextResponse,
     setNextStatusCode,
+    setStatusCode,
+    setStatusCodes,
     setFeatureFlag,
     unauthorizeAction,
     listen,

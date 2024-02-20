@@ -48,6 +48,7 @@ import { isMultiProjectScan } from '../../../lib/is-multi-project-scan';
 import { getEcosystem, monitorEcosystem } from '../../../lib/ecosystems';
 import { getFormattedMonitorOutput } from '../../../lib/ecosystems/monitor';
 import { processCommandArgs } from '../process-command-args';
+import { hasFeatureFlag } from '../../../lib/feature-flags';
 
 const SEPARATOR = '\n-------------------------------------------------------\n';
 const debug = Debug('snyk');
@@ -92,18 +93,32 @@ export default async function monitor(...args0: MethodArgs): Promise<any> {
   if (options.docker && options['remote-repo-url']) {
     throw new Error('`--remote-repo-url` is not supported for container scans');
   }
-
-  // TODO remove 'app-vulns' options and warning message once
-  // https://github.com/snyk/cli/pull/3433 is merged
   if (options.docker) {
-    if (!options['app-vulns'] || options['exclude-app-vulns']) {
+    // order is important here, we want:
+    // 1) exclude-app-vulns set -> no app vulns
+    // 2) app-vulns set -> app-vulns
+    // 3) neither set -> containerAppVulnsEnabled
+    if (options['exclude-app-vulns']) {
       options['exclude-app-vulns'] = true;
-    }
+    } else if (options['app-vulns']) {
+      options['exclude-app-vulns'] = false;
+    } else {
+      options['exclude-app-vulns'] = !(await hasFeatureFlag(
+        'containerCliAppVulnsEnabled',
+        options,
+      ));
 
-    // we can't print the warning message with JSON output as that would make
-    // the JSON output invalid.
-    if (!options['app-vulns'] && !options['json']) {
-      console.log(theme.color.status.warn(appVulnsReleaseWarningMsg));
+      // we can't print the warning message with JSON output as that would make
+      // the JSON output invalid.
+      // We also only want to print the message if the user did not overwrite
+      // the default with one of the flags.
+      if (
+        options['exclude-app-vulns'] &&
+        !options['json'] &&
+        !options['sarif']
+      ) {
+        console.log(theme.color.status.warn(appVulnsReleaseWarningMsg));
+      }
     }
   }
 
@@ -157,7 +172,16 @@ export default async function monitor(...args0: MethodArgs): Promise<any> {
       } else {
         packageManager = detect.detectPackageManager(path, options);
       }
-
+      const unsupportedPackageManagers: Array<{
+        label: string;
+        name: string;
+      }> = [];
+      const unsupportedPackageManager = unsupportedPackageManagers.find(
+        (pm) => pm.name === packageManager,
+      );
+      if (unsupportedPackageManager) {
+        return `${unsupportedPackageManager.label} projects do not currently support "snyk monitor"`;
+      }
       const targetFile =
         !options.scanAllUnmanaged && options.docker && !options.file // snyk monitor --docker (without --file)
           ? undefined

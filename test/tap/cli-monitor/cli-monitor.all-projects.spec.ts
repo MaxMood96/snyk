@@ -85,7 +85,11 @@ export const AllProjectsTests: AcceptanceTests = {
         'ruby project in output',
       );
       t.match(result, 'npm/graph/some/project-id', 'npm project in output');
-      t.match(result, 'maven/some/project-id', 'maven project in output ');
+      t.match(
+        result,
+        'maven/graph/some/project-id',
+        'maven project in output ',
+      );
       t.match(result, 'nuget/some/project-id', 'nuget project in output');
       t.match(result, 'paket/some/project-id', 'paket project in output');
       t.match(result, 'pip/some/project-id', 'python project in output ');
@@ -145,12 +149,16 @@ export const AllProjectsTests: AcceptanceTests = {
         'did not call rubygems plugin',
       );
       t.ok(spyPlugin.withArgs('npm').notCalled, 'did not call npm plugin');
-      t.equals(
+      t.equal(
         spyPlugin.withArgs('maven').callCount,
         2,
         'calls maven plugin twice',
       );
-      t.match(result, 'maven/some/project-id', 'maven project was monitored ');
+      t.match(
+        result,
+        'maven/graph/some/project-id',
+        'maven project was monitored ',
+      );
 
       const requests = params.server.popRequests(2);
 
@@ -190,7 +198,7 @@ export const AllProjectsTests: AcceptanceTests = {
       );
       t.match(
         result,
-        'Dependency snyk was not found in yarn.lock',
+        'Dependency snyk@* was not found in yarn.lock',
         'yarn project had an error and we displayed it',
       );
 
@@ -436,12 +444,16 @@ export const AllProjectsTests: AcceptanceTests = {
         'did not call rubygems plugin',
       );
       t.ok(spyPlugin.withArgs('npm').notCalled, 'did not call npm plugin');
-      t.equals(
+      t.equal(
         spyPlugin.withArgs('maven').callCount,
         1,
         'calls maven plugin once, excluding simple-child',
       );
-      t.match(result, 'maven/some/project-id', 'maven project was monitored ');
+      t.match(
+        result,
+        'maven/graph/some/project-id',
+        'maven project was monitored ',
+      );
       const request = params.server.popRequest();
       t.match(request.url, '/monitor/', 'puts at correct url');
       t.notOk(request.body.targetFile, "doesn't send the targetFile");

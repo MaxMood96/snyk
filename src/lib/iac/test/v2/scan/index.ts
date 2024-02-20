@@ -10,10 +10,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as rimraf from 'rimraf';
 import config from '../../../../config';
-import { api } from '../../../../api-token';
+import { api, getOAuthToken } from '../../../../api-token';
 import envPaths from 'env-paths';
+import { restoreEnvProxy } from '../../../env-utils';
 
 const debug = newDebug('snyk-iac');
+const debugOutput = newDebug('snyk-iac:output');
 
 export const systemCachePath = config.CACHE_PATH ?? envPaths('snyk').cache;
 
@@ -21,6 +23,7 @@ export async function scan(
   options: TestConfig,
   policyEnginePath: string,
   rulesBundlePath: string,
+  rulesClientURL: string,
 ): Promise<TestOutput> {
   const {
     tempOutput: outputPath,
@@ -32,8 +35,9 @@ export async function scan(
       options,
       policyEnginePath,
       rulesBundlePath,
-      outputPath,
+      rulesClientURL,
       tempPolicyPath,
+      outputPath,
     );
   } finally {
     await deleteTemporaryFiles(tempDirPath);
@@ -44,21 +48,39 @@ async function scanWithConfig(
   options: TestConfig,
   policyEnginePath: string,
   rulesBundlePath: string,
-  outputPath: string,
+  rulesClientURL: string,
   policyPath: string,
+  outputPath: string,
 ): Promise<TestOutput> {
   const env = { ...process.env };
 
+  const apiUrl = config.API_REST_URL;
+  if (apiUrl.startsWith('http://')) {
+    console.warn(
+      '\nYou configured the Snyk CLI to use an API URL with an HTTP scheme. This option is insecure and might prevent the Snyk CLI from working correctly.',
+    );
+  }
+
   env['SNYK_IAC_TEST_API_REST_URL'] =
-    process.env['SNYK_IAC_TEST_API_REST_URL'] || getApiUrl();
+    process.env['SNYK_IAC_TEST_API_REST_URL'] || apiUrl;
   env['SNYK_IAC_TEST_API_REST_TOKEN'] =
     process.env['SNYK_IAC_TEST_API_REST_TOKEN'] || getApiToken();
+  env['SNYK_IAC_TEST_API_REST_OAUTH_TOKEN'] =
+    process.env['SNYK_IAC_TEST_API_REST_OAUTH_TOKEN'] || getOAuthToken();
   env['SNYK_IAC_TEST_API_V1_URL'] =
-    process.env['SNYK_IAC_TEST_API_V1_URL'] || getApiUrl();
+    process.env['SNYK_IAC_TEST_API_V1_URL'] || apiUrl;
   env['SNYK_IAC_TEST_API_V1_TOKEN'] =
     process.env['SNYK_IAC_TEST_API_V1_TOKEN'] || getApiToken();
+  env['SNYK_IAC_TEST_API_V1_OAUTH_TOKEN'] =
+    process.env['SNYK_IAC_TEST_API_V1_OAUTH_TOKEN'] || getOAuthToken();
 
-  const args = processFlags(options, rulesBundlePath, outputPath, policyPath);
+  const args = processFlags(
+    options,
+    rulesBundlePath,
+    rulesClientURL,
+    outputPath,
+    policyPath,
+  );
 
   args.push(...options.paths);
 
@@ -74,7 +96,13 @@ async function scanWithConfig(
     throw new ScanError(`spawning process: ${child.error}`);
   }
 
-  return mapSnykIacTestOutputToTestOutput(await readJson(outputPath));
+  const results = await readJson(outputPath);
+
+  if (debugOutput.enabled) {
+    debugOutput('snyk-iac-test output:\n', JSON.stringify(results, null, 2));
+  }
+
+  return mapSnykIacTestOutputToTestOutput(results);
 }
 
 async function readJson(path: string) {
@@ -88,17 +116,11 @@ async function readJson(path: string) {
 function processFlags(
   options: TestConfig,
   rulesBundlePath: string,
+  rulesClientURL: string,
   outputPath: string,
   policyPath: string,
 ) {
-  const flags = [
-    '-cache-dir',
-    systemCachePath,
-    '-bundle',
-    rulesBundlePath,
-    '-policy',
-    policyPath,
-  ];
+  const flags = ['-bundle', rulesBundlePath, '-policy', policyPath];
 
   flags.push('-output', outputPath);
 
@@ -134,10 +156,6 @@ function processFlags(
     flags.push('-var-file', options.varFile);
   }
 
-  if (options.cloudContext) {
-    flags.push('-cloud-context', options.cloudContext);
-  }
-
   if (options.snykCloudEnvironment) {
     flags.push('-snyk-cloud-environment', options.snykCloudEnvironment);
   }
@@ -148,6 +166,10 @@ function processFlags(
 
   if (options.org) {
     flags.push('-org', options.org);
+  }
+
+  if (options.userRulesClientURL) {
+    flags.push('-rulesClientURL', rulesClientURL);
   }
 
   return flags;
@@ -220,7 +242,7 @@ async function readFile(path: string) {
 }
 
 async function remove(path: string) {
-  return new Promise((resolve, reject) => {
+  return new Promise<void>((resolve, reject) => {
     rimraf(path, (err) => {
       if (err) {
         reject(err);
@@ -229,10 +251,6 @@ async function remove(path: string) {
       }
     });
   });
-}
-
-function getApiUrl() {
-  return config.API_REST_URL;
 }
 
 function getApiToken() {
@@ -252,6 +270,8 @@ async function spawn(
   env: Record<string, string | undefined>,
 ) {
   return new Promise<SpawnResult>((resolve) => {
+    env = restoreEnvProxy(env);
+
     const child = childProcess.spawn(path, args, {
       stdio: 'pipe',
       env: env,

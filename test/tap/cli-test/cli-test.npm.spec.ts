@@ -21,6 +21,43 @@ export const NpmTests: AcceptanceTests = {
       t.match(req.body.targetFile, undefined, 'target is undefined');
     },
 
+    '`test npm-package with lockfile v2`': (params, utils) => async (t) => {
+      utils.chdirWorkspaces();
+      await params.cli.test('npm-package-lockfile-v2');
+      const req = params.server.popRequest();
+      const depGraph = req.body.depGraph;
+      t.same(
+        depGraph.pkgs.map((p) => p.id).sort(),
+        ['npm-package-lockfile-v2@1.0.0', 'ms@0.7.1', 'debug@2.2.0'].sort(),
+        'depGraph looks fine',
+      );
+    },
+
+    '`test npm-package with lockfile v3`': (params, utils) => async (t) => {
+      utils.chdirWorkspaces();
+      await params.cli.test('npm-package-lockfile-v3');
+      const req = params.server.popRequest();
+      const depGraph = req.body.depGraph;
+      t.same(
+        depGraph.pkgs.map((p) => p.id).sort(),
+        ['npm-package-lockfile-v3@1.0.0', 'ms@0.7.1', 'debug@2.2.0'].sort(),
+        'depGraph looks fine',
+      );
+    },
+
+    '`test npm-package with lockfile v3 bundled deps`': (
+      params,
+      utils,
+    ) => async (t) => {
+      utils.chdirWorkspaces();
+      const res = await params.cli.test('npm-package-lockfile-v3-bundled-deps');
+      t.match(
+        res,
+        /Tested 570 dependencies for known vulnerabilities/,
+        'should succeed scanning npm lock v3 with bundled deps',
+      );
+    },
+
     'test npm-package remoteUrl': (params, utils) => async (t) => {
       utils.chdirWorkspaces();
       process.env.GIT_DIR = 'npm-package/gitdir';
@@ -31,7 +68,7 @@ export const NpmTests: AcceptanceTests = {
         'http://github.com/snyk/npm-package',
         'git remoteUrl is passed',
       );
-      t.equals(
+      t.equal(
         req.body.target.branch,
         'master',
         'correct branch passed to request',
@@ -55,7 +92,7 @@ export const NpmTests: AcceptanceTests = {
         'foo',
         'specified remoteUrl is passed',
       );
-      t.equals(
+      t.equal(
         req.body.target.branch,
         'master',
         'correct branch passed to request',
@@ -210,7 +247,7 @@ export const NpmTests: AcceptanceTests = {
         });
         t.fail('Should fail');
       } catch (e) {
-        t.includes(
+        t.match(
           e.message,
           '--file=package.json',
           'Contains enough info about err',
@@ -249,6 +286,74 @@ export const NpmTests: AcceptanceTests = {
         depGraph.pkgs.map((p) => p.id).sort(),
         ['npm-package-subfolder@1.0.0', 'to-array@0.1.4'].sort(),
         'depGraph looks fine',
+      );
+    },
+    '`test npm-package-with-overrides` correctly completes test': (
+      params,
+      utils,
+    ) => async (t) => {
+      utils.chdirWorkspaces();
+      await params.cli.test('npm-package-with-overrides');
+      const req = params.server.popRequest();
+      const depGraph = req.body.depGraph;
+      t.same(
+        depGraph.pkgs.map((p) => p.id).includes('semver@6.0.0'),
+        false,
+        'override pkg original version not present',
+      );
+      t.same(
+        depGraph.pkgs.map((p) => p.id).includes('semver@7.5.2'),
+        true,
+        'override pkg is correct version',
+      );
+    },
+    '`test npm-lock-v2-with-npm-prefixed-sub-dep-version` correctly completes test': (
+      params,
+      utils,
+    ) => async (t) => {
+      utils.chdirWorkspaces();
+      await params.cli.test('npm-lock-v2-with-npm-prefixed-sub-dep-version');
+      const req = params.server.popRequest();
+      const depGraph = req.body.depGraph;
+      t.same(
+        depGraph.pkgs.map((p) => p.id).includes('string-width-cjs@4.2.3'),
+        true,
+        'npm prefixed subdep has a numbered version',
+      );
+    },
+    '`test npm-lock-v2-with-simple-version-range-override` correctly completes test': (
+      params,
+      utils,
+    ) => async (t) => {
+      utils.chdirWorkspaces();
+      await params.cli.test('npm-lock-v2-with-simple-version-range-override');
+      const req = params.server.popRequest();
+      const depGraph = req.body.depGraph;
+      t.notOk(
+        depGraph.pkgs
+          .map((p) => p.id)
+          .find((el: string) => el.startsWith('uuid@8')),
+        'no uuid version matching ^8',
+      );
+      t.ok(
+        depGraph.pkgs
+          .map((p) => p.id)
+          .find((el: string) => el.startsWith('uuid@9')),
+        'uuid version matching ^9',
+      );
+    },
+    '`test npm-package-with-dist-tag-subdependency` correctly completes test': (
+      params,
+      utils,
+    ) => async (t) => {
+      utils.chdirWorkspaces();
+      await params.cli.test('npm-package-with-dist-tag-subdependency');
+      const req = params.server.popRequest();
+      const depGraph = req.body.depGraph;
+      t.same(
+        depGraph.pkgs.map((p) => p.id).includes('cdktf-cli@0.20.3'),
+        true,
+        'npm subdep with dist tag has a numbered version',
       );
     },
   },

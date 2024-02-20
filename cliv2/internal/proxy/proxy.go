@@ -12,10 +12,13 @@ import (
 	"os"
 
 	"github.com/google/uuid"
+	"github.com/snyk/go-application-framework/pkg/configuration"
 
-	"github.com/snyk/cli/cliv2/internal/certs"
-	"github.com/snyk/cli/cliv2/internal/utils"
+	"github.com/snyk/go-application-framework/pkg/networking/certs"
 	"github.com/snyk/go-httpauth/pkg/httpauth"
+
+	"github.com/snyk/cli/cliv2/internal/constants"
+	"github.com/snyk/cli/cliv2/internal/utils"
 
 	"github.com/elazarl/goproxy"
 	"github.com/elazarl/goproxy/ext/auth"
@@ -33,6 +36,7 @@ type WrapperProxy struct {
 	cliVersion          string
 	proxyUsername       string
 	proxyPassword       string
+	addHeaderFunc       func(*http.Request) error
 }
 
 type ProxyInfo struct {
@@ -46,10 +50,14 @@ const (
 	PROXY_USERNAME = "snykcli"
 )
 
-func NewWrapperProxy(insecureSkipVerify bool, cacheDirectory string, cliVersion string, debugLogger *log.Logger) (*WrapperProxy, error) {
+func NewWrapperProxy(config configuration.Configuration, cliVersion string, debugLogger *log.Logger) (*WrapperProxy, error) {
 	var p WrapperProxy
 	p.DebugLogger = debugLogger
 	p.cliVersion = cliVersion
+	p.addHeaderFunc = func(request *http.Request) error { return nil }
+
+	cacheDirectory := config.GetString(configuration.CACHE_PATH)
+	insecureSkipVerify := config.GetBool(configuration.INSECURE_HTTPS)
 
 	certName := "snyk-embedded-proxy"
 	certPEMBlock, keyPEMBlock, err := certs.MakeSelfSignedCert(certName, []string{}, p.DebugLogger)
@@ -57,13 +65,9 @@ func NewWrapperProxy(insecureSkipVerify bool, cacheDirectory string, cliVersion 
 		return nil, err
 	}
 
-	tempDir, err := utils.SnykTempDirectory(p.DebugLogger)
-	if err != nil {
-		p.DebugLogger.Println("failed to create system temp directory:", tempDir)
-		return nil, err
-	}
-
-	certFile, err := os.CreateTemp(tempDir, "snyk-cli-cert-*.crt")
+	tmpDirectory := utils.GetTemporaryDirectory(cacheDirectory, cliVersion)
+	utils.CreateAllDirectories(cacheDirectory, cliVersion)
+	certFile, err := os.CreateTemp(tmpDirectory, "snyk-cli-cert-*.crt")
 	if err != nil {
 		fmt.Println("failed to create temp cert file")
 		return nil, err
@@ -71,7 +75,33 @@ func NewWrapperProxy(insecureSkipVerify bool, cacheDirectory string, cliVersion 
 	defer certFile.Close()
 
 	p.CertificateLocation = certFile.Name() // gives full path, not just the name
-	p.DebugLogger.Println("p.CertificateLocation:", p.CertificateLocation)
+
+	rootCAs, err := x509.SystemCertPool()
+	if err != nil {
+		return nil, err
+	}
+
+	// append any given extra CA certificate to the internal PEM data before storing it to file
+	// this merges user provided CA certificates with the internal one
+	if extraCaCertFile, ok := os.LookupEnv(constants.SNYK_CA_CERTIFICATE_LOCATION_ENV); ok {
+		extraCertificateBytes, extraCertificateList, extraCertificateError := certs.GetExtraCaCert(extraCaCertFile)
+		if extraCertificateError == nil {
+			// add to pem data
+			certPEMBlock = append(certPEMBlock, '\n')
+			certPEMBlock = append(certPEMBlock, extraCertificateBytes...)
+
+			// add to cert pool
+			for _, currentCert := range extraCertificateList {
+				if currentCert != nil {
+					rootCAs.AddCert(currentCert)
+				}
+			}
+
+			p.DebugLogger.Println("Using additional CAs from file: ", extraCaCertFile)
+		}
+	}
+
+	p.DebugLogger.Println("Temporary CertificateLocation:", p.CertificateLocation)
 
 	certPEMString := string(certPEMBlock)
 	err = utils.WriteToFile(p.CertificateLocation, certPEMString)
@@ -88,6 +118,7 @@ func NewWrapperProxy(insecureSkipVerify bool, cacheDirectory string, cliVersion 
 	p.transport = &http.Transport{
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: insecureSkipVerify, // goproxy defaults to true
+			RootCAs:            rootCAs,
 		},
 	}
 
@@ -108,12 +139,11 @@ func (p *WrapperProxy) ProxyInfo() *ProxyInfo {
 }
 
 func (p *WrapperProxy) replaceVersionHandler(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
-	// Manipulate Header (replace x-snyk-cli-version)
-	existingValue := r.Header.Get("x-snyk-cli-version")
-	if existingValue != "" {
-		p.DebugLogger.Printf("Replacing value of existing x-snyk-cli-version header (%s) with %s\n", existingValue, p.cliVersion)
-		r.Header.Set("x-snyk-cli-version", p.cliVersion)
+	err := p.addHeaderFunc(r)
+	if err != nil {
+		p.DebugLogger.Printf("Failed to add header: %s", err)
 	}
+
 	return r, nil
 }
 
@@ -242,4 +272,8 @@ func (p *WrapperProxy) UpstreamProxy() func(req *http.Request) (*url.URL, error)
 
 func (p *WrapperProxy) Transport() *http.Transport {
 	return p.transport
+}
+
+func (p *WrapperProxy) SetHeaderFunction(addHeaderFunc func(*http.Request) error) {
+	p.addHeaderFunc = addHeaderFunc
 }

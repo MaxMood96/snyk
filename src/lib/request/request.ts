@@ -107,7 +107,9 @@ function setupRequest(payload: Payload) {
       ? new http.Agent({ keepAlive: true })
       : new https.Agent({ keepAlive: true });
   const options: needle.NeedleOptions = {
+    use_proxy_from_env_var: false,
     json: payload.json,
+    parse: payload.parse,
     headers: payload.headers,
     timeout: payload.timeout,
     follow_max: 5,

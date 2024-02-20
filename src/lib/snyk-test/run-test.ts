@@ -8,7 +8,7 @@ import { icon } from '../theme';
 import { parsePackageString as moduleToObject } from 'snyk-module';
 import * as depGraphLib from '@snyk/dep-graph';
 import * as theme from '../../lib/theme';
-import { jsonStringifyLargeObject } from '../../lib/json';
+import * as pMap from 'p-map';
 
 import {
   AffectedPackages,
@@ -22,18 +22,21 @@ import {
 } from './legacy';
 import {
   AuthFailedError,
+  BadGatewayError,
   DockerImageNotFoundError,
+  errorMessageWithRetry,
   FailedToGetVulnerabilitiesError,
   FailedToGetVulnsFromUnavailableResource,
   FailedToRunTestError,
   InternalServerError,
   NoSupportedManifestsFoundError,
   NotFoundError,
-  errorMessageWithRetry,
+  ServiceUnavailableError,
 } from '../errors';
 import * as snyk from '../';
 import { isCI } from '../is-ci';
 import * as common from './common';
+import { RETRY_ATTEMPTS, RETRY_DELAY } from './common';
 import config from '../config';
 import * as analytics from '../analytics';
 import { maybePrintDepGraph, maybePrintDepTree } from '../print-deps';
@@ -56,9 +59,9 @@ import { extractPackageManager } from '../plugins/extract-package-manager';
 import { getExtraProjectCount } from '../plugins/get-extra-project-count';
 import { findAndLoadPolicy } from '../policy';
 import {
+  DepTreeFromResolveDeps,
   Payload,
   PayloadBody,
-  DepTreeFromResolveDeps,
   TestDependenciesRequest,
 } from './types';
 import { getAuthHeader } from '../api-token';
@@ -68,8 +71,12 @@ import { assembleEcosystemPayloads } from './assemble-payloads';
 import { makeRequest } from '../request';
 import { spinner } from '../spinner';
 import { hasUnknownVersions } from '../dep-graph';
+import { sleep } from '../common';
 
 const debug = debugModule('snyk:run-test');
+
+// Controls the number of simultaneous test requests that can be in-flight.
+const MAX_CONCURRENCY = 5;
 
 function prepareResponseForParsing(
   payload: Payload,
@@ -219,14 +226,56 @@ async function sendAndParseResults(
   options: Options & TestOptions,
 ): Promise<TestResult[]> {
   const results: TestResult[] = [];
-  for (const payload of payloads) {
-    await spinner.clear<void>(spinnerLbl)();
-    if (!options.quiet) {
-      await spinner(spinnerLbl);
+
+  await spinner.clear<void>(spinnerLbl)();
+  if (!options.quiet) {
+    await spinner(spinnerLbl);
+  }
+
+  type TestResponse = {
+    payload: Payload;
+    originalPayload: Payload;
+    response: any;
+  };
+
+  const sendRequest = async (
+    originalPayload: Payload,
+  ): Promise<TestResponse> => {
+    let step = 0;
+    let error;
+
+    while (step < RETRY_ATTEMPTS) {
+      debug(`sendTestPayload retry step ${step} out of ${RETRY_ATTEMPTS}`);
+      try {
+        /** sendTestPayload() deletes the request.body from the payload once completed. */
+        const payload = Object.assign({}, originalPayload);
+        const response = await sendTestPayload(payload);
+
+        return { payload, originalPayload, response };
+      } catch (err) {
+        error = err;
+        step++;
+
+        if (
+          err instanceof InternalServerError ||
+          err instanceof BadGatewayError ||
+          err instanceof ServiceUnavailableError
+        ) {
+          await sleep(RETRY_DELAY);
+        } else {
+          break;
+        }
+      }
     }
-    /** sendTestPayload() deletes the request.body from the payload once completed. */
-    const payloadCopy = Object.assign({}, payload);
-    const res = await sendTestPayload(payload);
+
+    throw error;
+  };
+
+  const responses = await pMap(payloads, sendRequest, {
+    concurrency: MAX_CONCURRENCY,
+  });
+
+  for (const { payload, originalPayload, response } of responses) {
     const {
       depGraph,
       payloadPolicy,
@@ -240,8 +289,8 @@ async function sendAndParseResults(
       scanResult,
       hasUnknownVersions,
     } = prepareResponseForParsing(
-      payloadCopy,
-      res as TestDependenciesResponse,
+      originalPayload,
+      response as TestDependenciesResponse,
       options,
     );
 
@@ -251,7 +300,7 @@ async function sendAndParseResults(
       await maybePrintDepGraph(options, depGraph);
     }
 
-    const legacyRes = convertIssuesToAffectedPkgs(res);
+    const legacyRes = convertIssuesToAffectedPkgs(response);
 
     const result = await parseRes(
       depGraph,
@@ -448,6 +497,9 @@ function sendTestPayload(
       }
       if (res.statusCode !== 200) {
         const err = handleTestHttpErrorResponse(res, body);
+        debug('sendTestPayload request URL:', payload.url);
+        debug('sendTestPayload response status code:', res.statusCode);
+        debug('sendTestPayload response body:', body);
         return reject(err);
       }
 
@@ -473,6 +525,14 @@ function handleTestHttpErrorResponse(res, body) {
       break;
     case 500:
       err = new InternalServerError(userMessage);
+      err.innerError = body.stack;
+      break;
+    case 502:
+      err = new BadGatewayError(userMessage);
+      err.innerError = body.stack;
+      break;
+    case 503:
+      err = new ServiceUnavailableError(userMessage);
       err.innerError = body.stack;
       break;
     default:
@@ -686,7 +746,7 @@ async function assembleLocalPayloads(
 
       // print dep graph if `--print-graph` is set
       if (options['print-graph'] && !options['print-deps']) {
-        await spinner.clear<void>(spinnerLbl)();
+        spinner.clear<void>(spinnerLbl)();
         let root: depGraphLib.DepGraph;
         if (scannedProject.depGraph) {
           root = pkg as depGraphLib.DepGraph;
@@ -698,9 +758,9 @@ async function assembleLocalPayloads(
           );
         }
 
-        console.log('DepGraph data:');
-        console.log(jsonStringifyLargeObject(root.toJSON()));
-        console.log('DepGraph target:\n' + targetFile + '\nDepGraph end');
+        console.log(
+          common.depGraphToOutputString(root.toJSON(), targetFile || ''),
+        );
       }
 
       const body: PayloadBody = {

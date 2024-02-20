@@ -1,10 +1,12 @@
 import * as camelCase from 'lodash.camelcase';
 import { DepGraphData } from '@snyk/dep-graph';
 import { GraphNode } from '@snyk/dep-graph/dist/core/types';
-import { getAuthHeader } from '../../api-token';
-import { isCI } from '../../is-ci';
-import { makeRequest } from '../../request';
 import config from '../../config';
+import { makeRequest, makeRequestRest } from '../../request/promise';
+import { pollDepGraphAttributes, submitHashes } from '../resolve-test-facts';
+import { ScanResult } from '../types';
+import { DepGraphDataOpenAPI } from './types';
+import { getAuthHeader } from '../../api-token';
 
 function mapKey(object, iteratee) {
   object = Object(object);
@@ -47,34 +49,100 @@ export function convertDepGraph<T>(depGraphOpenApi: T) {
   return depGraph;
 }
 
+interface SelfResponse {
+  jsonapi: {
+    version: string;
+  };
+  data: {
+    type: string;
+    id: string;
+    attributes: {
+      name: string;
+      username: string;
+      email: string;
+      avatar_url: string;
+      default_org_context: string;
+    };
+    links: {
+      self: string;
+    };
+  };
+}
+
+interface OrgsResponse {
+  orgs: {
+    group: string;
+    name: string;
+    url: string;
+    id: string;
+    slug: string;
+  }[];
+}
+
+export async function getOrgIdFromSlug(slug: string): Promise<string> {
+  const res = await makeRequest<OrgsResponse>({
+    method: 'GET',
+    headers: {
+      Authorization: getAuthHeader(),
+    },
+    url: config.API + '/orgs',
+  });
+
+  for (const org of res.orgs) {
+    if (org.slug === slug) {
+      return org.id;
+    }
+  }
+
+  return '';
+}
+
 export function getSelf() {
-  return makeSelfRequest().then((res: any) => {
-    const response = JSON.parse(res.body);
-    return response?.data?.attributes;
+  return makeRequestRest<SelfResponse>({
+    method: 'GET',
+    url: `${config.API_REST_URL}/self?version=2022-08-12~experimental`,
   });
 }
 
-export function makeSelfRequest() {
-  const payload = {
-    method: 'GET',
-    url: `${config.API_REST_URL}/self?version=2022-08-12~experimental`,
-    json: true,
-    headers: {
-      'x-is-ci': isCI(),
-      authorization: getAuthHeader(),
-    },
-  };
+export async function getOrgDefaultContext(): Promise<string> {
+  return (await getSelf())?.data.attributes.default_org_context;
+}
 
-  return new Promise((resolve, reject) => {
-    makeRequest(payload, (error, res, body) => {
-      if (error) {
-        return reject(error);
+export function isUUID(str) {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(str);
+}
+
+export async function getOrg(org?: string | null) {
+  let orgId = org || (await getOrgDefaultContext()) || '';
+
+  if (!isUUID(orgId)) {
+    orgId = await getOrgIdFromSlug(orgId);
+  }
+
+  return orgId;
+}
+
+export async function getUnmanagedDepGraph(scans: {
+  [dir: string]: ScanResult[];
+}) {
+  const results: DepGraphDataOpenAPI[] = [];
+  const orgId = await getOrgDefaultContext();
+
+  for (const [, scanResults] of Object.entries(scans)) {
+    for (const scanResult of scanResults) {
+      const taskId = await submitHashes(
+        { hashes: scanResult?.facts[0]?.data },
+        orgId,
+      );
+
+      const { dep_graph_data } = await pollDepGraphAttributes(taskId, orgId);
+
+      if (dep_graph_data) {
+        results.push(dep_graph_data);
       }
+    }
+  }
 
-      resolve({
-        res,
-        body,
-      });
-    });
-  });
+  return results;
 }

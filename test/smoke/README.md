@@ -46,7 +46,7 @@ npm run test:smoke
 
 `REGRESSION_TEST=1` enables the extended mode we use for regression testing. For the hourly tests in GitHub Actions we use a limited scope of tested commands.
 
-You may specify an envvar `SNYK_COMMAND` to any executable that will be used by Smoke tests. E.g. a local exuctable `SNYK_COMMAND="./snyk-macos"` or an `SNYK_COMMAND="npx snyk@1.500.0"` or `SNYK_COMMAND="node ./dist/cli"` for local execution.
+You may specify an envvar `TEST_SNYK_COMMAND` to any executable that will be used by Smoke tests. E.g. a local exuctable `SNYK_COMMAND="./snyk-macos"` or an `SNYK_COMMAND="npx snyk@1.500.0"` or `SNYK_COMMAND="node ./dist/cli"` for local execution.
 
 This will meddle with your `snyk config` file as Smoke Tests are checking functionality of `snyk config` command.
 
@@ -87,7 +87,7 @@ This will open a browser in one instance unless it's disabled with `SMOKE_TESTS_
 To run the Alpine test in Docker locally (you probably don't want to…):
 
 ```
- docker build -f ./test/smoke/alpine/Dockerfile -t snyk-cli-alpine ./test/ && docker run --rm -eSMOKE_TESTS_SNYK_TOKEN=$SNYK_API_TOKEN snyk-cli-alpine
+ docker build -f ./test/smoke/alpine/Dockerfile -t snyk-cli-alpine ./test/ && docker run --rm -eTEST_SNYK_TOKEN=$SNYK_API_TOKEN snyk-cli-alpine
 ```
 
 _Note: Alpine image is not copying/mounting everything, so you might need to add anything new to the `test/smoke/alpine/Dockerfile`_

@@ -42,6 +42,7 @@ import * as depGraphLib from '@snyk/dep-graph';
 import { getFixturePath } from '../jest/util/getFixturePath';
 import { getWorkspacePath } from '../jest/util/getWorkspacePath';
 import { snykHttpClient } from '../../src/lib/request/snyk-http-client';
+import * as os from 'os';
 
 /*
   TODO: enable these tests, once we switch from node-tap
@@ -51,10 +52,7 @@ import { snykHttpClient } from '../../src/lib/request/snyk-http-client';
   - Jakub
 */
 
-const isWindows =
-  require('os-name')()
-    .toLowerCase()
-    .indexOf('windows') === 0;
+const isWindows = os.platform().indexOf('win') === 0;
 
 if (!isWindows) {
   before('setup', async (t) => {
@@ -218,6 +216,22 @@ if (!isWindows) {
     );
   });
 
+  test('`monitor swift`', async (t) => {
+    chdirWorkspaces();
+    await cli.monitor('swift');
+    const req = server.popRequest();
+    t.equal(req.method, 'PUT', 'makes PUT request');
+    t.equal(
+      req.headers['x-snyk-cli-version'],
+      versionNumber,
+      'sends version number',
+    );
+    const depGraphJSON = req.body.depGraphJSON;
+    t.ok(depGraphJSON);
+    t.match(req.url, '/monitor/swift/graph', 'puts at correct url');
+    t.ok(req.body.targetFile, './Package.swift');
+  });
+
   test('`monitor npm-out-of-sync graph monitor`', async (t) => {
     chdirWorkspaces();
     await cli.monitor('npm-out-of-sync-graph', {
@@ -225,8 +239,8 @@ if (!isWindows) {
     });
     const req = server.popRequest();
     t.match(req.url, '/monitor/npm/graph', 'puts at correct url');
-    t.true(!isEmpty(req.body.depGraphJSON), 'sends depGraphJSON');
-    t.deepEqual(
+    t.ok(!isEmpty(req.body.depGraphJSON), 'sends depGraphJSON');
+    t.same(
       req.body.meta.missingDeps,
       ['body-parser@^1.18.2'],
       'missingDeps passed',
@@ -256,21 +270,14 @@ if (!isWindows) {
       'sends version number',
     );
     t.match(req.url, '/monitor/gradle/graph', 'puts at correct url');
-    t.deepEqual(req.body.meta.monitorGraph, true, 'correct meta set');
+    t.same(req.body.meta.monitorGraph, true, 'correct meta set');
     const depGraphJSON = req.body.depGraphJSON;
     t.ok(depGraphJSON);
 
-    const actualDepGraph = JSON.stringify(depGraphJSON);
-    const expectedPrunedDepGraph = fs.readFileSync(
-      path.join(fixturePath, 'gradle-pruned-dep-graph.json'),
-      'utf8',
-    );
-
-    t.ok(expectedPrunedDepGraph);
-
-    t.equal(
-      actualDepGraph,
-      expectedPrunedDepGraph,
+    t.ok(
+      depGraphJSON.graph.nodes.find(
+        (node) => node.info?.labels?.pruned === 'true',
+      ),
       'verify if the generated depGraph from snyk monitor has been pruned',
     );
   });
@@ -289,7 +296,7 @@ if (!isWindows) {
       'sends version number',
     );
     t.match(req.url, '/monitor/npm/graph', 'puts at correct url');
-    t.deepEqual(req.body.meta.monitorGraph, true, 'correct meta set');
+    t.same(req.body.meta.monitorGraph, true, 'correct meta set');
     t.ok(req.body.meta.prePruneDepCount, 'sends meta.prePruneDepCount');
     const depGraphJSON = req.body.depGraphJSON;
     t.ok(depGraphJSON);
@@ -331,16 +338,16 @@ if (!isWindows) {
     const req = server.popRequest();
     t.equal(req.method, 'PUT', 'makes PUT request');
     t.match(req.url, '/monitor/sbt/graph', 'puts at correct url');
-    t.true(!isEmpty(req.body.depGraphJSON), 'sends depGraphJSON');
+    t.ok(!isEmpty(req.body.depGraphJSON), 'sends depGraphJSON');
     if (process.platform === 'win32') {
-      t.true(
+      t.ok(
         req.body.targetFileRelativePath.endsWith(
           '\\test\\acceptance\\workspaces\\sbt-simple-struts\\build.sbt',
         ),
         'matching file path',
       );
     } else {
-      t.true(
+      t.ok(
         req.body.targetFileRelativePath.endsWith(
           '/test/acceptance/workspaces/sbt-simple-struts/build.sbt',
         ),
@@ -374,14 +381,14 @@ if (!isWindows) {
     t.notOk(depGraphJSON.from, 'no "from" array on root');
     t.notOk(debug.from, 'no "from" array on dep');
     if (process.platform === 'win32') {
-      t.true(
+      t.ok(
         req.body.targetFileRelativePath.endsWith(
           '\\test\\acceptance\\workspaces\\yarn-package\\yarn.lock',
         ),
         'matching file path win32',
       );
     } else {
-      t.true(
+      t.ok(
         req.body.targetFileRelativePath.endsWith(
           '/test/acceptance/workspaces/yarn-package/yarn.lock',
         ),
@@ -412,14 +419,14 @@ if (!isWindows) {
     t.notOk(depGraphJSON.from, 'no "from" array on root');
     t.notOk(lodash.from, 'no "from" array on dep');
     if (process.platform === 'win32') {
-      t.true(
+      t.ok(
         req.body.targetFileRelativePath.endsWith(
           '\\test\\acceptance\\workspaces\\yarn-v2\\yarn.lock',
         ),
         'matching file path win32',
       );
     } else {
-      t.true(
+      t.ok(
         req.body.targetFileRelativePath.endsWith(
           '/test/acceptance/workspaces/yarn-v2/yarn.lock',
         ),
@@ -453,14 +460,14 @@ if (!isWindows) {
 
     t.match(req.url, '/monitor/yarn/graph', 'puts at correct url');
     if (process.platform === 'win32') {
-      t.true(
+      t.ok(
         req.body.targetFileRelativePath.endsWith(
           '\\test\\acceptance\\workspaces\\yarn-package\\yarn.lock',
         ),
         'matching file path',
       );
     } else {
-      t.true(
+      t.ok(
         req.body.targetFileRelativePath.endsWith(
           '/test/acceptance/workspaces/yarn-package/yarn.lock',
         ),
@@ -484,7 +491,7 @@ if (!isWindows) {
       'project-business-criticality': 'high,medium',
     });
     const req = server.popRequest();
-    t.deepEqual(req.body.projectAttributes.criticality, ['high', 'medium']);
+    t.same(req.body.projectAttributes.criticality, ['high', 'medium']);
   });
 
   test('`monitor npm-package with --project-environment`', async (t) => {
@@ -493,10 +500,7 @@ if (!isWindows) {
       'project-environment': 'frontend,backend',
     });
     const req = server.popRequest();
-    t.deepEqual(req.body.projectAttributes.environment, [
-      'frontend',
-      'backend',
-    ]);
+    t.same(req.body.projectAttributes.environment, ['frontend', 'backend']);
   });
 
   test('`monitor npm-package with --project-lifecycle`', async (t) => {
@@ -505,10 +509,16 @@ if (!isWindows) {
       'project-lifecycle': 'production,sandbox',
     });
     const req = server.popRequest();
-    t.deepEqual(req.body.projectAttributes.lifecycle, [
-      'production',
-      'sandbox',
-    ]);
+    t.same(req.body.projectAttributes.lifecycle, ['production', 'sandbox']);
+  });
+
+  test('`monitor nuget package with --dotnet-runtime-resolution enabled`', async (t) => {
+    chdirWorkspaces();
+    await cli.monitor('nuget-app-6', {
+      'dotnet-runtime-resolution': true,
+    });
+    const req = server.popRequest();
+    t.same(req.body.meta.targetRuntime, 'net6.0');
   });
 
   test('`monitor npm-package with --project-tags`', async (t) => {
@@ -517,7 +527,7 @@ if (!isWindows) {
       'project-tags': 'department=finance,team=outbound-payments',
     });
     const req = server.popRequest();
-    t.deepEqual(req.body.tags, [
+    t.same(req.body.tags, [
       { key: 'department', value: 'finance' },
       { key: 'team', value: 'outbound-payments' },
     ]);
@@ -541,7 +551,7 @@ if (!isWindows) {
       });
       t.fail('should not succeed');
     } catch (err) {
-      t.contains(
+      t.match(
         err,
         /Invalid argument provided for --remote-repo-url/,
         'correct error message',
@@ -667,7 +677,13 @@ if (!isWindows) {
     stubExec(t, 'maven-app/mvn-dep-tree-stdout.txt');
     await cli.monitor('maven-app', { file: 'pom.xml', dev: true });
     const req = server.popRequest();
-    const pkg = req.body.package;
+    const depGraphJSON = req.body.depGraphJSON;
+    const pkgName = depGraphJSON.pkgs.find(
+      (pkg) => pkg.info.name === 'com.mycompany.app:maven-app',
+    );
+    const dep = depGraphJSON.pkgs.find(
+      (pkg) => pkg.info.name === 'junit:junit',
+    );
     t.equal(req.method, 'PUT', 'makes PUT request');
     t.equal(
       req.headers['x-snyk-cli-version'],
@@ -675,15 +691,9 @@ if (!isWindows) {
       'sends version number',
     );
     t.match(req.url, '/monitor/maven', 'puts at correct url');
-    t.equal(pkg.name, 'com.mycompany.app:maven-app', 'specifies name');
-    t.ok(pkg.dependencies['junit:junit'], 'specifies dependency');
-    t.equal(
-      pkg.dependencies['junit:junit'].name,
-      'junit:junit',
-      'specifies dependency name',
-    );
-    t.notOk(pkg.from, 'no "from" array on root');
-    t.notOk(pkg.dependencies['junit:junit'].from, 'no "from" array on dep');
+    t.ok(pkgName, 'specifies name');
+    t.ok(dep, 'specifies dependency');
+    t.notOk(depGraphJSON.from, 'no "from" array on root');
   });
 
   test('`monitor maven-multi-app`', async (t) => {
@@ -691,7 +701,13 @@ if (!isWindows) {
     stubExec(t, 'maven-multi-app/mvn-dep-tree-stdout.txt');
     await cli.monitor('maven-multi-app', { file: 'pom.xml' });
     const req = server.popRequest();
-    const pkg = req.body.package;
+    const depGraphJSON = req.body.depGraphJSON;
+    const pkgName = depGraphJSON.pkgs.find(
+      (pkg) => pkg.info.name === 'com.mycompany.app:maven-multi-app',
+    );
+    const noMod = depGraphJSON.pkgs.find(
+      (pkg) => pkg.info.name === 'com.mycompany.app:simple-child',
+    );
     t.equal(req.method, 'PUT', 'makes PUT request');
     t.equal(
       req.headers['x-snyk-cli-version'],
@@ -699,13 +715,10 @@ if (!isWindows) {
       'sends version number',
     );
     t.match(req.url, '/monitor/maven', 'puts at correct url');
-    t.equal(pkg.name, 'com.mycompany.app:maven-multi-app', 'specifies name');
+    t.ok(pkgName, 'specifies name');
     // child projects are not included when scanning root project
-    t.notOk(
-      pkg.dependencies?.['com.mycompany.app:simple-child'],
-      'does not include modules',
-    );
-    t.notOk(pkg.from, 'no "from" array on root');
+    t.notOk(noMod, 'does not include modules');
+    t.notOk(depGraphJSON.from, 'no "from" array on root');
   });
 
   test('`monitor maven-multi-app with --project-business-criticality`', async (t) => {
@@ -716,7 +729,7 @@ if (!isWindows) {
       'project-business-criticality': 'high,medium',
     });
     const req = server.popRequest();
-    t.deepEqual(req.body.projectAttributes.criticality, ['high', 'medium']);
+    t.same(req.body.projectAttributes.criticality, ['high', 'medium']);
   });
 
   test('`monitor maven-multi-app with ---project-tags`', async (t) => {
@@ -727,7 +740,7 @@ if (!isWindows) {
       'project-tags': 'department=finance,team=outbound-payments',
     });
     const req = server.popRequest();
-    t.deepEqual(req.body.tags, [
+    t.same(req.body.tags, [
       { key: 'department', value: 'finance' },
       { key: 'team', value: 'outbound-payments' },
     ]);
@@ -741,10 +754,7 @@ if (!isWindows) {
       'project-environment': 'frontend,backend',
     });
     const req = server.popRequest();
-    t.deepEqual(req.body.projectAttributes.environment, [
-      'frontend',
-      'backend',
-    ]);
+    t.same(req.body.projectAttributes.environment, ['frontend', 'backend']);
   });
 
   test('`monitor maven-multi-app with --project-lifecycle`', async (t) => {
@@ -755,10 +765,7 @@ if (!isWindows) {
       'project-lifecycle': 'production,sandbox',
     });
     const req = server.popRequest();
-    t.deepEqual(req.body.projectAttributes.lifecycle, [
-      'production',
-      'sandbox',
-    ]);
+    t.same(req.body.projectAttributes.lifecycle, ['production', 'sandbox']);
   });
 
   test('`monitor maven-app-with-jars --file=example.jar` sends package info', async (t) => {
@@ -1143,7 +1150,7 @@ if (!isWindows) {
     loadPlugin.withArgs('gradle').returns(plugin);
 
     await cli.monitor('gradle-app', { allSubProjects: true });
-    t.true(((spyPlugin.args[0] as any)[2] as any).allSubProjects);
+    t.ok(((spyPlugin.args[0] as any)[2] as any).allSubProjects);
 
     const req = server.popRequest();
     t.equal(req.method, 'PUT', 'makes PUT request');
@@ -1152,12 +1159,12 @@ if (!isWindows) {
       versionNumber,
       'sends version number',
     );
-    t.deepEqual(
+    t.same(
       req.body.meta.gradleProjectName,
       'original-name',
       'gradleProjectName passed',
     );
-    t.deepEqual(
+    t.same(
       req.body.meta.versionBuildInfo,
       '{"java":"8","gradleVersion":"6.4"}',
       'version build info passed',
@@ -1199,7 +1206,7 @@ if (!isWindows) {
     loadPlugin.withArgs('pip').returns(plugin);
 
     await cli.monitor('gradle-app', 'pip-app', { allSubProjects: true });
-    t.true(((spyPlugin.args[0] as any)[2] as any).allSubProjects);
+    t.ok(((spyPlugin.args[0] as any)[2] as any).allSubProjects);
 
     let req = server.popRequest();
     t.equal(req.method, 'PUT', 'makes PUT request for pip');
@@ -1274,10 +1281,10 @@ if (!isWindows) {
         'project-name': 'frumpus',
       });
     } catch (e) {
-      t.contains(e, /is currently not compatible/);
+      t.match(e, /is currently not compatible/);
     }
 
-    t.true(spyPlugin.notCalled, "`inspect` method wasn't called");
+    t.ok(spyPlugin.notCalled, "`inspect` method wasn't called");
   });
 
   test('`monitor golang-gomodules --file=go.mod', async (t) => {
@@ -1700,7 +1707,7 @@ if (!isWindows) {
       versionNumber,
       'sends version number',
     );
-    t.deepEqual(
+    t.same(
       req.body,
       {
         method: 'cli',
@@ -1723,7 +1730,7 @@ if (!isWindows) {
       [
         {
           docker: true,
-          'exclude-app-vulns': true,
+          'exclude-app-vulns': false,
           org: 'explicit-org',
           path: 'foo:latest',
         },
@@ -1767,7 +1774,7 @@ if (!isWindows) {
     );
     t.match(req.url, '/monitor-dependencies', 'puts at correct url');
 
-    t.deepEqual(
+    t.same(
       req.body,
       {
         method: 'cli',
@@ -1792,7 +1799,7 @@ if (!isWindows) {
       [
         {
           docker: true,
-          'exclude-app-vulns': true,
+          'exclude-app-vulns': false,
           file: 'Dockerfile',
           org: 'explicit-org',
           path: 'foo:latest',
@@ -1826,7 +1833,7 @@ if (!isWindows) {
       org: 'explicit-org',
     });
     const req = server.popRequest();
-    t.deepEqual(req.body.scanResult.policy, undefined, 'no policy is sent');
+    t.same(req.body.scanResult.policy, undefined, 'no policy is sent');
   });
 
   test('`monitor foo:latest --docker` with custom policy path', async (t) => {
@@ -1860,7 +1867,7 @@ if (!isWindows) {
       [
         {
           docker: true,
-          'exclude-app-vulns': true,
+          'exclude-app-vulns': false,
           org: 'explicit-org',
           'policy-path': 'custom-location',
           path: 'foo:latest',
@@ -1873,9 +1880,46 @@ if (!isWindows) {
       'utf8',
     );
     const policyString = req.body.scanResult.policy;
-    t.deepEqual(policyString, expected, 'sends correct policy');
+    t.same(policyString, expected, 'sends correct policy');
   });
+  test('`monitor foo:latest --docker` with exlude app vulns flag', async (t) => {
+    chdirWorkspaces('npm-package-policy');
+    const spyPlugin = stubDockerPluginResponse(
+      {
+        scanResults: [
+          {
+            identity: {
+              type: 'rpm',
+            },
+            target: {
+              image: 'docker-image|foo',
+            },
+            facts: [{ type: 'depGraph', data: {} }],
+          },
+        ],
+        attributes: {},
+      },
+      t,
+    );
 
+    await cli.monitor('foo:latest', {
+      docker: true,
+      'exclude-app-vulns': true,
+      org: 'explicit-org',
+    });
+    t.same(
+      spyPlugin.getCall(0).args,
+      [
+        {
+          docker: true,
+          'exclude-app-vulns': true,
+          org: 'explicit-org',
+          path: 'foo:latest',
+        },
+      ],
+      'calls docker plugin with expected arguments',
+    );
+  });
   test('`monitor foo:latest --docker --platform=linux/arm64`', async (t) => {
     const platform = 'linux/arm64';
     const spyPlugin = stubDockerPluginResponse(
@@ -1901,7 +1945,7 @@ if (!isWindows) {
       docker: true,
     });
     const req = server.popRequest();
-    t.deepEqual(
+    t.same(
       req.body,
       {
         method: 'cli',
@@ -1924,7 +1968,7 @@ if (!isWindows) {
       [
         {
           docker: true,
-          'exclude-app-vulns': true,
+          'exclude-app-vulns': false,
           path: 'foo:latest',
           platform,
         },
@@ -1956,7 +2000,7 @@ if (!isWindows) {
       org: 'fake-org',
     });
     const req = server.popRequest();
-    t.deepEqual(
+    t.same(
       req.query,
       {
         org: 'fake-org',
@@ -2002,7 +2046,7 @@ if (!isWindows) {
         t.fail('Failed parsing monitor JSON output');
       }
       const keyList = ['packageManager', 'manageUrl'];
-      t.true(Array.isArray(res), 'Response is an array');
+      t.ok(Array.isArray(res), 'Response is an array');
       t.equal(res.length, 2, 'Two monitor responses in the array');
       res.forEach((project) => {
         keyList.forEach((k) => {

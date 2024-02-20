@@ -1,12 +1,15 @@
 import * as sarif from 'sarif';
-import { TestResult } from '../snyk-test/legacy';
+import * as upperFirst from 'lodash.upperfirst';
+import { AnnotatedIssue, TestResult } from '../snyk-test/legacy';
 import { SEVERITY } from '../snyk-test/legacy';
-const upperFirst = require('lodash.upperfirst');
+import { getResults } from './get-sarif-result';
 
 export function createSarifOutputForContainers(
   testResults: TestResult[],
 ): sarif.Log {
   const sarifRes: sarif.Log = {
+    $schema:
+      'https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json',
     version: '2.1.0',
     runs: [],
   };
@@ -33,6 +36,9 @@ export function getTool(testResult): sarif.Tool {
   const tool: sarif.Tool = {
     driver: {
       name: 'Snyk Container',
+      properties: {
+        artifactsScanned: testResult.dependencyCount,
+      },
       rules: [],
     },
   };
@@ -43,12 +49,12 @@ export function getTool(testResult): sarif.Tool {
 
   const pushedIds = {};
   tool.driver.rules = testResult.vulnerabilities
-    .map((vuln) => {
+    .map((vuln: AnnotatedIssue) => {
       if (pushedIds[vuln.id]) {
         return;
       }
       const level = getIssueLevel(vuln.severity);
-      const cve = vuln['identifiers']['CVE'][0];
+      const cve = vuln.identifiers?.CVE?.join();
       pushedIds[vuln.id] = true;
       return {
         id: vuln.id,
@@ -70,39 +76,16 @@ export function getTool(testResult): sarif.Tool {
           level: level,
         },
         properties: {
-          tags: ['security', ...vuln.identifiers.CWE],
+          tags: [
+            'security',
+            ...(vuln.identifiers?.CWE || []),
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            testResult.packageManager!,
+          ],
+          cvssv3_baseScore: vuln.cvssScore,
         },
       };
     })
     .filter(Boolean);
   return tool;
-}
-
-export function getResults(testResult): sarif.Result[] {
-  const results: sarif.Result[] = [];
-
-  if (!testResult.vulnerabilities) {
-    return results;
-  }
-  testResult.vulnerabilities.forEach((vuln) => {
-    results.push({
-      ruleId: vuln.id,
-      message: {
-        text: `This file introduces a vulnerable ${vuln.packageName} package with a ${vuln.severity} severity vulnerability.`,
-      },
-      locations: [
-        {
-          physicalLocation: {
-            artifactLocation: {
-              uri: testResult.displayTargetFile,
-            },
-            region: {
-              startLine: vuln.lineNumber || 1,
-            },
-          },
-        },
-      ],
-    });
-  });
-  return results;
 }

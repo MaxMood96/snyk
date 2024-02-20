@@ -1,9 +1,10 @@
 import * as sarif from 'sarif';
-const upperFirst = require('lodash.upperfirst');
-const groupBy = require('lodash.groupby');
-const map = require('lodash.map');
+import * as upperFirst from 'lodash.upperfirst';
+import * as groupBy from 'lodash.groupby';
+import * as map from 'lodash.map';
 
-import { TestResult, SEVERITY, AnnotatedIssue } from '../snyk-test/legacy';
+import { TestResult, AnnotatedIssue } from '../snyk-test/legacy';
+import { getResults } from './get-sarif-result';
 
 const LOCK_FILES_TO_MANIFEST_MAP = {
   'Gemfile.lock': 'Gemfile',
@@ -27,6 +28,9 @@ export function createSarifOutputForOpenSource(
       tool: {
         driver: {
           name: 'Snyk Open Source',
+          properties: {
+            artifactsScanned: testResult.dependencyCount,
+          },
           rules: getRules(testResult),
         },
       },
@@ -51,7 +55,7 @@ export function getRules(testResult: TestResult): sarif.ReportingDescriptor[] {
   const groupedVulnerabilities = groupBy(testResult.vulnerabilities, 'id');
   return map(
     groupedVulnerabilities,
-    ([vuln, ...moreVulns]): sarif.ReportingDescriptor => {
+    ([vuln, ...moreVulns]: AnnotatedIssue[]): sarif.ReportingDescriptor => {
       const cves = vuln.identifiers?.CVE?.join();
       return {
         id: vuln.id,
@@ -83,49 +87,11 @@ ${vuln.description}`.replace(/##\s/g, '# '),
             // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
             testResult.packageManager!,
           ],
+          cvssv3_baseScore: vuln.cvssScore,
         },
       };
     },
   );
-}
-
-export function getResults(testResult): sarif.Result[] {
-  const groupedVulnerabilities = groupBy(testResult.vulnerabilities, 'id');
-  return map(
-    groupedVulnerabilities,
-    ([vuln]): sarif.Result => ({
-      ruleId: vuln.id,
-      level: getLevel(vuln),
-      message: {
-        text: `This file introduces a vulnerable ${vuln.packageName} package with a ${vuln.severity} severity vulnerability.`,
-      },
-      locations: [
-        {
-          physicalLocation: {
-            artifactLocation: {
-              uri: testResult.displayTargetFile,
-            },
-            region: {
-              startLine: vuln.lineNumber || 1,
-            },
-          },
-        },
-      ],
-    }),
-  );
-}
-
-export function getLevel(vuln: AnnotatedIssue) {
-  switch (vuln.severity) {
-    case SEVERITY.CRITICAL:
-    case SEVERITY.HIGH:
-      return 'error';
-    case SEVERITY.MEDIUM:
-      return 'warning';
-    case SEVERITY.LOW:
-    default:
-      return 'note';
-  }
 }
 
 function getIntroducedThrough(vuln: AnnotatedIssue) {

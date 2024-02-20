@@ -27,7 +27,7 @@ git clone git@github.com/snyk/cli.git
 cd snyk
 ```
 
-You will now be on our `master` branch. You should never commit to this branch, but you should keep it up-to-date to ensure you have the latest changes.
+You will now be on our `main` branch. You should never commit to this branch, but you should keep it up-to-date to ensure you have the latest changes.
 
 ```sh
 git fetch
@@ -37,33 +37,21 @@ git pull --ff-only
 If you encounter vague errors without a clear solution at any point, try starting over by cloning a new copy or cleaning the project.
 
 ```
-npm run clean
+make clean
 ```
 
 ## Building
 
-Install project dependencies.
+To build the project, run the following command in the root of the repository.
 
 ```sh
-npm ci
+make build
 ```
 
-Build the project.
+Run the build binary like this.
 
 ```sh
-npm run build
-```
-
-Ensure the build is working. The version should be `1.0.0-monorepo`.
-
-```sh
-npx . --version
-```
-
-For faster rebuilds, you can watch for changes. This command will keep running so you will want to run this in a separate terminal or background.
-
-```
-npm run watch
+./binary-releases/snyk-macos --version
 ```
 
 ## Running tests
@@ -117,6 +105,18 @@ Use [fake-server](./test/acceptance/fake-server.ts) to mock any Snyk API calls. 
 
 Place fixtures in `./test/fixtures`. Keep them minimal to reduce maintenance. Use [`createProject`](./test/jest/util/createProject.ts) to use your fixtures in isolated working directories for your tests.
 
+Before running the tests locally you will need to:
+
+- Set the `TEST_SNYK_TOKEN` environment variable with a [valid API token](https://docs.snyk.io/snyk-api/authentication-for-api).
+- Run `make build` to ensure you have binary
+- Set `TEST_SNYK_COMMAND` to the path of the built binary for your environment, for example: `./binary-releases/snyk-macos`
+
+You can run acceptance tests with:
+
+```
+npm run test:acceptance -- --selectProjects coreCli
+```
+
 ### Smoke Tests
 
 Smoke tests typically don't run on branches unless the branch is specifically prefixed with `smoke/`. They usually run on an hourly basis against the latest published version of the CLI.
@@ -140,7 +140,11 @@ npm ci
 npm install <your dependency>
 ```
 
-It's best to avoid adding external dependencies. All dependency changes are reviewed by Hammer.
+It's best to avoid adding external dependencies. All dependency changes are reviewed by Hammerhead.
+
+## Adding features in beta
+
+When implementing a feature that is at first in beta state, consider requiring the `--experimental` flag to be set. This increases visibility in the state of the feature being used.
 
 ## Code formatting
 
@@ -188,7 +192,7 @@ You can use these patterns in your branch name to enable additional checks.
 | ------------------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `chore/*`, `*test*` | `chore/change`, `test/change`, `feat/change+test` | Build and test all artifacts, excluding CLIv2. Same as a [release pipeline](#creating-a-release) without the release step. |
 | `smoke/*`           | `smoke/change`                                    | Run [smoke tests](https://github.com/snyk/cli/actions/workflows/smoke-tests.yml) against the latest release.               |
-| `*cliv2*`           | `feat/cliv2-feature`                              | Build and test all artifacts, including CLIv2.                                                                             |
+| `*e2e*`             | `chore/feature1_e2e`                              | Run parts of the deployment pipeline to cover end to end tests already on the current branch                               |
 | default             | `fix/a-bug`                                       | Build and test your changes.                                                                                               |
 
 For more information, see: [Pull request checks](#pull-request-checks).
@@ -262,7 +266,7 @@ Your PR checks will run every time you push changes to your branch.
 | `test_and_release` | See: [Test pipeline](#test-pipeline).                                 |
 | `Danger`           | Check the comment created on your PR.                                 |
 | `license/cla`      | Visit [CLA Assistant](https://cla-assistant.io) to sign or re-run it. |
-| Everything else.   | Ask Hammer.                                                           |
+| Everything else.   | Ask Hammerhead.                                                       |
 
 ### Test pipeline
 
@@ -280,7 +284,7 @@ Once you have received the necessary approvals, you can merge.
 
 ## Creating a release
 
-Merges will create a [release pipeline](https://app.circleci.com/pipelines/github/snyk/cli?branch=master&filter=all) which will build and test your changes against a range of target platforms.
+Merges will create a [release pipeline](https://app.circleci.com/pipelines/github/snyk/cli?branch=main&filter=all) which will build and test your changes against a range of target platforms.
 
 Once all tests have passed, you will be given the choice to publish a new release containing your changes.
 
@@ -288,10 +292,23 @@ All releases are minor version bumps. For the latest releases, see: [Releases](h
 
 If you do not want to publish your changes immediately, you can "Cancel Workflow".
 
-If your release pipeline fails at any step, notify Hammer.
+If your release pipeline fails at any step, notify Hammerhead.
 
 You may see some "Docker Hub" checks on your merge commit fail. This is normal and safe to ignore.
 
+## Snyk CLI Docker Images
+
+After the `release-npm` job successfully completes, an automated process generates the Docker images for Snyk CLI. These images are then published to DockerHub under the repository [`snyk/snyk`](https://hub.docker.com/r/snyk/snyk).
+
+## Upgrading the go-application-framework
+
+If you have made changes to the `go-application-framework`, you can run `python3 scripts/upgrade-go-application-framework.py`. This will;
+
+- Fetch the most recent commit from main of the framework
+- Go get that version of the framework
+
+You can then raise a pr with the relevant changes.
+
 ---
 
-Questions? Ask Hammer 🔨
+Questions? Ask Hammerhead 🔨

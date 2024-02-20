@@ -1,3 +1,4 @@
+import { AuthFailedError } from '../errors';
 import { Options, PolicyOptions } from '../types';
 import { spinner } from '../../lib/spinner';
 import {
@@ -22,15 +23,15 @@ import {
 import { extractAndApplyPluginAnalytics } from './plugin-analytics';
 import { findAndLoadPolicy } from '../policy';
 import { filterIgnoredIssues } from './policy';
-import { IssueData, Issue } from '../snyk-test/legacy';
-import { hasFeatureFlag } from '../feature-flags';
+import { IssueDataUnmanaged, Issue } from '../snyk-test/legacy';
 import {
   convertDepGraph,
   convertMapCasing,
   convertToCamelCase,
-  getSelf,
+  getOrg,
 } from './unmanaged/utils';
 import { sleep } from '../common';
+import { SEVERITY } from '../snyk-test/common';
 
 export async function resolveAndTestFacts(
   ecosystem: Ecosystem,
@@ -39,19 +40,23 @@ export async function resolveAndTestFacts(
   },
   options: Options & PolicyOptions,
 ): Promise<[TestResult[], string[]]> {
-  const unmanagedDepsOverride = process.env.USE_UNMANAGED_DEPS;
+  try {
+    return await resolveAndTestFactsUnmanagedDeps(scans, options);
+  } catch (error) {
+    const unauthorized = error.code === 401 || error.code === 403;
 
-  const featureFlagEnabled = await hasFeatureFlag(
-    'snykNewUnmanagedTest',
-    options,
-  );
+    if (unauthorized) {
+      throw AuthFailedError(
+        'Unauthorized request to unmanaged service',
+        error.code,
+      );
+    }
 
-  return featureFlagEnabled || unmanagedDepsOverride
-    ? resolveAndTestFactsUnmanagedDeps(scans, options)
-    : resolveAndTestFactsRegistry(ecosystem, scans, options);
+    throw error;
+  }
 }
 
-async function submitHashes(
+export async function submitHashes(
   hashes: FileHashes,
   orgId: string,
 ): Promise<string> {
@@ -60,24 +65,28 @@ async function submitHashes(
   return response.data.id;
 }
 
-async function pollDepGraphAttributes(
+export async function pollDepGraphAttributes(
   id: string,
   orgId: string,
 ): Promise<Attributes> {
-  const maxIntervalMs = 60000;
-  const minIntervalMs = 5000;
+  const minIntervalMs = 2000;
+  const maxIntervalMs = 20000;
 
-  const maxAttempts = 31; // Corresponds to 25.5 minutes
+  let totalElaspedTime = 0;
+  let attempts = 1;
+  const maxElapsedTime = 1800000; // 30 mins in ms
 
   // Loop until we receive a response that is not in progress,
   // or we receive something else than http status code 200.
-  for (let i = 1; i <= maxAttempts; i++) {
+  while (totalElaspedTime <= maxElapsedTime) {
     const graph = await getDepGraph(id, orgId);
 
     if (graph.data.attributes.in_progress) {
-      const pollInterval = Math.max(maxIntervalMs, minIntervalMs * i);
-      await sleep(pollInterval * i);
+      const pollInterval = Math.min(minIntervalMs * attempts, maxIntervalMs);
+      await sleep(pollInterval);
 
+      totalElaspedTime += pollInterval;
+      attempts++;
       continue;
     }
 
@@ -91,6 +100,7 @@ async function fetchIssues(
   start_time,
   dep_graph_data,
   component_details,
+  target_severity: SEVERITY,
   orgId: string,
 ) {
   const response: GetIssuesResponse = await getIssues(
@@ -98,6 +108,7 @@ async function fetchIssues(
       dep_graph: dep_graph_data,
       start_time,
       component_details,
+      target_severity,
     },
     orgId,
   );
@@ -109,7 +120,7 @@ async function fetchIssues(
   });
 
   const issuesData = convertMapCasing<{
-    [issueId: string]: IssueData;
+    [issueId: string]: IssueDataUnmanaged;
   }>(response.data.result.issues_data);
 
   const depGraphData = convertDepGraph(response.data.result.dep_graph);
@@ -145,12 +156,14 @@ export async function resolveAndTestFactsUnmanagedDeps(
   const results: any[] = [];
   const errors: string[] = [];
   const packageManager = 'Unmanaged (C/C++)';
+  const displayTargetFile = '';
 
-  let orgId = options.org || '';
+  const orgId = await getOrg(options.org);
+  const target_severity: SEVERITY = options.severityThreshold || SEVERITY.LOW;
 
   if (orgId === '') {
-    const self = await getSelf();
-    orgId = self.default_org_context;
+    errors.push('organisation-id missing');
+    return [results, errors];
   }
 
   for (const [path, scanResults] of Object.entries(scans)) {
@@ -162,6 +175,10 @@ export async function resolveAndTestFactsUnmanagedDeps(
           { hashes: scanResult?.facts[0]?.data },
           orgId,
         );
+
+        if (scanResult.analytics) {
+          extractAndApplyPluginAnalytics(scanResult.analytics, id);
+        }
 
         const {
           start_time,
@@ -180,6 +197,7 @@ export async function resolveAndTestFactsUnmanagedDeps(
           start_time,
           dep_graph_data,
           component_details,
+          target_severity,
           orgId,
         );
 
@@ -188,7 +206,7 @@ export async function resolveAndTestFactsUnmanagedDeps(
           issuesMap[i.issueId] = i;
         });
 
-        const vulnerabilities: IssueData[] = [];
+        const vulnerabilities: IssueDataUnmanaged[] = [];
         for (const issuesDataKey in issuesData) {
           const pkgCoordinate = `${issuesMap[issuesDataKey]?.pkgName}@${issuesMap[issuesDataKey]?.pkgVersion}`;
           const issueData = issuesData[issuesDataKey];
@@ -196,7 +214,9 @@ export async function resolveAndTestFactsUnmanagedDeps(
           issueData.from = [pkgCoordinate];
           issueData.name = pkgCoordinate;
           issueData.packageManager = packageManager;
-
+          issueData.version = issuesMap[issuesDataKey]?.pkgVersion;
+          issueData.upgradePath = [false];
+          issueData.isPatchable = false;
           vulnerabilities.push(issueData);
         }
 
@@ -208,6 +228,21 @@ export async function resolveAndTestFactsUnmanagedDeps(
           policy,
         );
 
+        extractAndApplyPluginAnalytics([
+          {
+            name: 'packageManager',
+            data: depGraphData?.pkgManager?.name ?? '',
+          },
+          {
+            name: 'unmanagedDependencyCount',
+            data: depGraphData?.pkgs.length ?? 0,
+          },
+          {
+            name: 'unmanagedIssuesCount',
+            data: issues.length ?? 0,
+          },
+        ]);
+
         results.push({
           issues: issuesFiltered,
           issuesData: issuesDataFiltered,
@@ -218,6 +253,7 @@ export async function resolveAndTestFactsUnmanagedDeps(
           path,
           dependencyCount,
           packageManager,
+          displayTargetFile,
         });
       } catch (error) {
         const hasStatusCodeError = error.code >= 400 && error.code <= 500;
@@ -235,6 +271,7 @@ export async function resolveAndTestFactsUnmanagedDeps(
   return [results, errors];
 }
 
+// resolveAndTestFactsRegistry has been deprecated, and will be removed in upcoming release.
 export async function resolveAndTestFactsRegistry(
   ecosystem: Ecosystem,
   scans: {
@@ -245,6 +282,7 @@ export async function resolveAndTestFactsRegistry(
   const results: any[] = [];
   const errors: string[] = [];
   const packageManager = 'Unmanaged (C/C++)';
+  const displayTargetFile = '';
 
   for (const [path, scanResults] of Object.entries(scans)) {
     await spinner(`Resolving and Testing fileSignatures in ${path}`);
@@ -277,7 +315,7 @@ export async function resolveAndTestFactsRegistry(
           issuesMap[i.issueId] = i;
         });
 
-        const vulnerabilities: IssueData[] = [];
+        const vulnerabilities: IssueDataUnmanaged[] = [];
         for (const issuesDataKey in response.issuesData) {
           if (issuesMap[issuesDataKey]) {
             const issueData = response.issuesData[issuesDataKey];
@@ -285,6 +323,9 @@ export async function resolveAndTestFactsRegistry(
             issueData.from = [pkgCoordinate];
             issueData.name = pkgCoordinate;
             issueData.packageManager = packageManager;
+            issueData.version = issuesMap[issuesDataKey]?.pkgVersion;
+            issueData.upgradePath = [false];
+            issueData.isPatchable = false;
             vulnerabilities.push(issueData);
           }
         }
@@ -305,6 +346,7 @@ export async function resolveAndTestFactsRegistry(
           path,
           dependencyCount,
           packageManager,
+          displayTargetFile,
         });
       } catch (error) {
         const hasStatusCodeError = error.code >= 400 && error.code <= 500;

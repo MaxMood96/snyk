@@ -87,6 +87,11 @@ export interface IssueData {
   name?: string;
 }
 
+export interface IssueDataUnmanaged extends IssueData {
+  upgradePath?: (string | boolean)[];
+  isPatchable?: boolean;
+}
+
 export type CallPath = string[];
 
 interface AnnotatedIssue extends IssueData {
@@ -99,6 +104,8 @@ interface AnnotatedIssue extends IssueData {
   isPatchable: boolean;
   severity: SEVERITY;
   originalSeverity?: SEVERITY;
+  cvssScore?: number;
+  lineNumber?: number;
 
   // These fields present for "node_module" based scans to allow remediation
   bundled?: any;
@@ -178,6 +185,7 @@ export interface TestResult extends LegacyVulnApiResult {
   foundProjectCount?: number;
   scanResult?: ScanResult;
   hasUnknownVersions?: boolean;
+  path?: string;
 }
 
 interface UpgradePathItem {
@@ -227,7 +235,7 @@ export interface Issue {
 
 export interface TestDependenciesResult {
   issuesData: {
-    [issueId: string]: IssueData;
+    [issueId: string]: IssueDataUnmanaged;
   };
   issues: Issue[];
   docker?: {

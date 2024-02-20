@@ -1,9 +1,7 @@
-const { danger, warn, fail, message } = require('danger');
+const { danger, warn, fail } = require('danger');
 const fs = require('fs');
 
 const MAX_COMMIT_MESSAGE_LENGTH = 72;
-const SMOKE_TEST_BRANCH = 'smoke/';
-const SMOKE_TEST_WORKFLOW_FILE_PATH = '.github/workflows/smoke-tests.yml';
 
 if (danger.github && danger.github.pr) {
   const ghCommits = danger.github.commits;
@@ -14,7 +12,7 @@ if (danger.github && danger.github.pr) {
     const firstLineRegex = /^(feat|fix|chore|test|docs|refactor|revert)(\(.*\))?:(.+)$/;
     if (!firstLineRegex.test(firstLine)) {
       fail(
-        `"[${firstLine}](${url})" is not using a valid commit message format. For commit guidelines, see: [CONTRIBUTING](https://github.com/snyk/snyk/blob/master/CONTRIBUTING.md#creating-commits).`,
+        `"[${firstLine}](${url})" is not using a valid commit message format. For commit guidelines, see: [CONTRIBUTING](https://github.com/snyk/snyk/blob/main/CONTRIBUTING.md#creating-commits).`,
       );
     }
 
@@ -57,22 +55,6 @@ if (danger.github && danger.github.pr) {
     warn(msg);
   }
 
-  // Smoke test modification check
-  const modifiedSmokeTest =
-    danger.git.modified_files.some((f) => f.startsWith('test/smoke/')) ||
-    danger.git.created_files.some((f) => f.startsWith('test/smoke/')) ||
-    danger.git.modified_files.includes(SMOKE_TEST_WORKFLOW_FILE_PATH);
-
-  const isOnSmokeTestBranch = danger.github.pr.head.ref.startsWith(
-    SMOKE_TEST_BRANCH,
-  );
-
-  if (modifiedSmokeTest && !isOnSmokeTestBranch) {
-    message(
-      `You are modifying something in \`test/smoke\` directory, yet you are not on the branch starting with ${SMOKE_TEST_BRANCH}. You can prefix your branch with ${SMOKE_TEST_BRANCH} and Smoke tests will trigger for this PR.`,
-    );
-  }
-
   // Enforce usage of ES6 modules
   const filesUsingNodeJSImportExport = danger.git.modified_files
     .filter((filePath) => {
@@ -105,7 +87,7 @@ if (danger.github && danger.github.pr) {
 
   if (modifiedHelp || createdHelp) {
     warn(
-      'Please make changes to `snyk help` text in [Gitbook](https://docs.snyk.io/snyk-cli/commands). Changes will be automatically synchronised to Snyk CLI as a [scheduled PR](https://github.com/snyk/snyk/actions/workflows/sync-cli-help-to-user-docs.yml).\nFor more information, see: [`help/README.md`](https://github.com/snyk/snyk/tree/master/help/README.md).',
+      'Please make changes to `snyk help` text in [Gitbook](https://docs.snyk.io/snyk-cli/commands). Changes will be automatically synchronised to Snyk CLI as a [scheduled PR](https://github.com/snyk/snyk/actions/workflows/sync-cli-help-to-user-docs.yml).\nFor more information, see: [`help/README.md`](https://github.com/snyk/snyk/tree/main/help/README.md).',
     );
   }
 }

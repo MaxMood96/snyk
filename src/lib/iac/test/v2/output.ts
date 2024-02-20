@@ -10,6 +10,7 @@ import {
   formatSnykIacTestTestData,
   getIacDisplayedIssues,
   IaCTestFailure,
+  IaCTestWarning,
   shareResultsTip,
   spinnerSuccessMessage,
 } from '../../../formatters/iac-output/text';
@@ -21,7 +22,7 @@ import {
 import { convertEngineToSarifResults } from './sarif';
 import { CustomError, FormattedCustomError } from '../../../errors';
 import { SnykIacTestError } from './errors';
-import stripAnsi from 'strip-ansi';
+import stripAnsi = require('strip-ansi');
 import * as path from 'path';
 import { getErrorStringCode } from '../../../../cli/commands/test/iac/local-execution/error-utils';
 import {
@@ -33,6 +34,8 @@ import {
   contentPadding,
 } from '../../../formatters/iac-output/text/utils';
 import * as wrapAnsi from 'wrap-ansi';
+import { formatIacTestWarnings } from '../../../formatters/iac-output/text/failures/list';
+import { IacV2Name, IacV2ShortLink } from '../../constants';
 
 export function buildOutput({
   scanResult,
@@ -146,6 +149,19 @@ function buildTextOutput({
       shouldShowLineNumbers: true,
     });
 
+  if (scanResult.warnings) {
+    const testWarnings: IaCTestWarning[] = scanResult.warnings.map((error) => ({
+      filePath: error.fields.path,
+      warningReason: error.userMessage,
+      term: error.fields.term,
+      module: error.fields.module,
+      modules: error.fields.modules,
+      expressions: error.fields.expressions,
+    }));
+
+    response += EOL.repeat(2) + formatIacTestWarnings(testWarnings);
+  }
+
   if (scanResult.errors) {
     const testFailures: IaCTestFailure[] = scanResult.errors.map((error) => ({
       filePath: error.fields.path,
@@ -192,7 +208,7 @@ function wrapWithPadding(s: string, columns: number): string {
 }
 
 function infoMessage(orgSettings: TestOutput): string {
-  return `Your organization ${orgSettings.settings.org} is using Integrated IaC. To switch to Current IaC, use --org=<ORG_ID> to select a different organization. For more information about Integrated IaC, see https://snyk.co/integrated-iac.`;
+  return `Your organization ${orgSettings.settings.org} is using ${IacV2Name}. To switch to Current IaC, use --org=<ORG_ID> to select a different organization. For more information about ${IacV2Name}, see ${IacV2ShortLink}.`;
 }
 
 function assertHasSuccessfulScans(

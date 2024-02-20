@@ -40,7 +40,7 @@ describe('`snyk test` with `--file=`', () => {
       const project = await createProjectFromFixture(
         'npm/with-vulnerable-lodash-dep',
       );
-      server.setDepGraphResponse(
+      server.setCustomResponse(
         await project.readJSON('test-dep-graph-result.json'),
       );
 
@@ -64,7 +64,7 @@ describe('`snyk test` with `--file=`', () => {
       const project = await createProjectFromFixture(
         'npm/with-vulnerable-lodash-dep',
       );
-      server.setDepGraphResponse(
+      server.setCustomResponse(
         await project.readJSON('test-dep-graph-result.json'),
       );
 
@@ -86,7 +86,7 @@ describe('`snyk test` with `--file=`', () => {
       const project = await createProjectFromFixture(
         'npm/with-vulnnerable-lodash-and-snyk-file',
       );
-      server.setDepGraphResponse(
+      server.setCustomResponse(
         await project.readJSON('test-dep-graph-result.json'),
       );
 
@@ -103,7 +103,9 @@ describe('`snyk test` with `--file=`', () => {
 
       // check that we're including the policy file in the request and that the policy
       // includes the ignored vuln id from the .snyk file
-      const testDepGraphRequest = server.getRequests()[0];
+      const testDepGraphRequest = server.getRequests().find((value) => {
+        return value.url == '/api/v1/test-dep-graph?org=';
+      });
       expect(testDepGraphRequest.body.policy).toBeDefined();
       expect(testDepGraphRequest.body.policy).toContain(
         'SNYK-JS-LODASH-590103',
@@ -115,7 +117,7 @@ describe('`snyk test` with `--file=`', () => {
       const project = await createProjectFromFixture(
         'npm/with-vulnnerable-lodash-and-snyk-file',
       );
-      server.setDepGraphResponse(
+      server.setCustomResponse(
         await project.readJSON('test-dep-graph-result.json'),
       );
 
@@ -128,7 +130,9 @@ describe('`snyk test` with `--file=`', () => {
 
       // check that we're including the policy file in the request and that the policy
       // includes the ignored vuln id from the .snyk file
-      const testDepGraphRequest = server.getRequests()[0];
+      const testDepGraphRequest = server.getRequests().find((value) => {
+        return value.url == '/api/v1/test-dep-graph?org=';
+      });
       expect(testDepGraphRequest.body.policy).toBeDefined();
       expect(testDepGraphRequest.body.policy).toContain(
         'SNYK-JS-LODASH-590103',

@@ -7,10 +7,16 @@ import { spinner } from '../../lib/spinner';
 import { Ecosystem, ScanResult, TestResult } from './types';
 import { getPlugin } from './plugins';
 import { TestDependenciesResponse } from '../snyk-test/legacy';
-import { assembleQueryString } from '../snyk-test/common';
+import {
+  assembleQueryString,
+  depGraphToOutputString,
+} from '../snyk-test/common';
 import { getAuthHeader } from '../api-token';
 import { resolveAndTestFacts } from './resolve-test-facts';
 import { isUnmanagedEcosystem } from './common';
+import { convertDepGraph, getUnmanagedDepGraph } from './unmanaged/utils';
+
+type ScanResultsByPath = { [dir: string]: ScanResult[] };
 
 export async function testEcosystem(
   ecosystem: Ecosystem,
@@ -31,18 +37,23 @@ export async function testEcosystem(
       sarifRes,
     );
   }
-  const scanResultsByPath: { [dir: string]: ScanResult[] } = {};
+  const results: ScanResultsByPath = {};
   for (const path of paths) {
     await spinner(`Scanning dependencies in ${path}`);
     options.path = path;
     const pluginResponse = await plugin.scan(options);
-    scanResultsByPath[path] = pluginResponse.scanResults;
+    results[path] = pluginResponse.scanResults;
   }
   spinner.clearAll();
 
+  if (isUnmanagedEcosystem(ecosystem) && options['print-graph']) {
+    const [target] = paths;
+    return formatUnmanagedResults(results, target);
+  }
+
   const [testResults, errors] = await selectAndExecuteTestStrategy(
     ecosystem,
-    scanResultsByPath,
+    results,
     options,
   );
 
@@ -51,7 +62,7 @@ export async function testEcosystem(
     return TestCommandResult.createJsonTestCommandResult(stringifiedData);
   }
   const emptyResults: ScanResult[] = [];
-  const scanResults = emptyResults.concat(...Object.values(scanResultsByPath));
+  const scanResults = emptyResults.concat(...Object.values(results));
 
   const readableResult = await plugin.display(
     scanResults,
@@ -74,6 +85,18 @@ export async function selectAndExecuteTestStrategy(
   return isUnmanagedEcosystem(ecosystem)
     ? await resolveAndTestFacts(ecosystem, scanResultsByPath, options)
     : await testDependencies(scanResultsByPath, options);
+}
+
+export async function formatUnmanagedResults(
+  results: ScanResultsByPath,
+  target: string,
+): Promise<TestCommandResult> {
+  const [result] = await getUnmanagedDepGraph(results);
+  const depGraph = convertDepGraph(result);
+
+  return TestCommandResult.createJsonTestCommandResult(
+    depGraphToOutputString(depGraph, target),
+  );
 }
 
 async function testDependencies(

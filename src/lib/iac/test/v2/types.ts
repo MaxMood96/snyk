@@ -5,6 +5,7 @@ export interface TestConfig {
   iacCachePath: string;
   userRulesBundlePath?: string;
   userPolicyEnginePath?: string;
+  userRulesClientURL?: string;
   report: boolean;
   severityThreshold?: SEVERITY;
   targetReference?: string;
@@ -14,8 +15,9 @@ export interface TestConfig {
   scan: string;
   varFile?: string;
   depthDetection?: number;
-  cloudContext?: string;
   snykCloudEnvironment?: string;
   insecure?: boolean;
   org?: string;
+  customRules?: boolean;
+  experimental?: boolean;
 }

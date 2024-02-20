@@ -12,7 +12,7 @@ spec_helper_configure() {
   }
 
   snyk_login() {
-    snyk config set api="${SMOKE_TESTS_SNYK_TOKEN}" 1> /dev/null
+    snyk config set api="${TEST_SNYK_TOKEN}" 1> /dev/null
   }
 
   snyk_logout() {
@@ -21,7 +21,7 @@ spec_helper_configure() {
 
   verify_login_url() {
     # https://snyk.io/login?token=uuid-token&utm_medium=cli&utm_source=cli&utm_campaign=cli&os=darwin&docker=false
-    echo "$1" | grep https | grep -E "^https://(app\.)?(dev\.)?(test\.)?snyk\.io/login\?token=[a-z0-9]{8}-([a-z0-9]{4}-){3}[a-z0-9]{12}\&.*$"
+    echo "$1" | grep https | grep -E "snyk\.io/login\?token=[a-z0-9]{8}-([a-z0-9]{4}-){3}[a-z0-9]{12}\&.*$"
   }
 
   # Consume stdout and checks validates whether it's a valid JSON
@@ -59,23 +59,19 @@ spec_helper_configure() {
 ╚══════╝╚═╝     ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝       ╚═╝   ╚══════╝╚══════╝   ╚═╝   ╚══════╝
 "
 
-  echo "Using this 'snyk' executable:"
-  echo "${SNYK_COMMAND:=$ORIGINAL_SNYK_EXECUTABLE}"
+  echo "------------------------------------------------------------------------------------------------------"
+  echo " Binary under test   [TEST_SNYK_COMMAND] ............ ${TEST_SNYK_COMMAND:=$ORIGINAL_SNYK_EXECUTABLE}"
+  echo " API Endpoint        [TEST_SNYK_API] ................ ${TEST_SNYK_API}"
+  echo " Token               [TEST_SNYK_TOKEN] .............. ***"
+  echo "------------------------------------------------------------------------------------------------------"
   echo " "
-  echo "You may override it with envvar SNYK_COMMAND - e.g. SNYK_COMMAND=\"node ./bin/snyk\" to test a local build"
-  echo " "
+
+  # ensure a clean test environment
+  unset SNYK_API
+  unset SNYK_API_KEY
+  export SNYK_API=${TEST_SNYK_API}
 
   snyk() {
-    eval "${SNYK_COMMAND:=$ORIGINAL_SNYK_EXECUTABLE}" "$@"
-  }
-
-  should_have_deprecation_warnings() {
-    #  deprecated node version will show additional stderr output for deprecation notices
-    if command -v node > /dev/null 2>&1; then
-      if node --version | grep -Eq "^v12.*"; then
-        return 0
-      fi
-    fi
-    return 1
+    eval "${TEST_SNYK_COMMAND:=$ORIGINAL_SNYK_EXECUTABLE}" "$@"
   }
 }

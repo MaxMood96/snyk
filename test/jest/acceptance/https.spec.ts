@@ -1,9 +1,12 @@
 import * as fs from 'fs';
-import { fakeServer, FakeServer } from '../../acceptance/fake-server';
+import {
+  fakeServer,
+  FakeServer,
+  getFirstIPv4Address,
+} from '../../acceptance/fake-server';
 import { createProjectFromWorkspace } from '../util/createProject';
 import { getFixturePath } from '../util/getFixturePath';
 import { runSnykCLI } from '../util/runSnykCLI';
-import { isCLIV2 } from '../util/isCLIV2';
 
 jest.setTimeout(1000 * 30);
 
@@ -12,12 +15,15 @@ describe('https', () => {
   let env: Record<string, string>;
 
   beforeAll(async () => {
+    const ipaddress = getFirstIPv4Address();
+    console.log('Using ip: ' + ipaddress);
+
     const port = process.env.PORT || process.env.SNYK_PORT || '12345';
     const baseApi = '/api/v1';
     env = {
       ...process.env,
-      SNYK_API: 'https://localhost:' + port + baseApi,
-      SNYK_HOST: 'https://localhost:' + port,
+      SNYK_API: 'https://' + ipaddress + ':' + port + baseApi,
+      SNYK_HOST: 'https://' + ipaddress + ':' + port,
       SNYK_TOKEN: '123456789',
     };
     server = fakeServer(baseApi, env.SNYK_TOKEN);
@@ -43,19 +49,14 @@ describe('https', () => {
     });
   });
 
-  describe('expired certificate', () => {
+  describe('invalid certificate', () => {
     it('rejects connections', async () => {
       const project = await createProjectFromWorkspace('npm-package');
-      const { code, stdout } = await runSnykCLI('test', {
+      const { code } = await runSnykCLI('test', {
         cwd: project.path(),
         env,
       });
-
-      expect(stdout).toContain(
-        isCLIV2()
-          ? 'socket hang up' // cliv2's proxy will drop the connection, but its debug logs will say why.
-          : 'certificate has expired',
-      );
+      expect(server.getRequests().length).toBe(0);
       expect(code).toBe(2);
     });
 
@@ -65,7 +66,18 @@ describe('https', () => {
         cwd: project.path(),
         env,
       });
+      expect(server.getRequests().length).toBeGreaterThan(1);
       expect(code).toBe(0);
+
+      // get rid of the first entry which has another User Agent
+      server
+        .getRequests()
+        .reverse()
+        .pop();
+
+      for (const r of server.getRequests()) {
+        expect(r.headers['user-agent']).toContain('snyk-cli/');
+      }
     });
   });
 });

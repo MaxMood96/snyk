@@ -9,8 +9,8 @@ import (
 	"github.com/snyk/cli/cliv2/internal/utils"
 )
 
-//go:embed cliv1.version
-var snykCLIVersion string
+// The actual version gets injected at build time
+var snykCLIVersion string = "0.0.0"
 
 func CLIV1Version() string {
 	return strings.TrimSpace(snykCLIVersion)
@@ -21,11 +21,7 @@ func CLIV1Version() string {
 func GetFullCLIV1TargetPath(cacheDir string) (string, error) {
 	cliv1Filename := getCLIv1Filename()
 	versionTag := CLIV1Version()
-	relPath := path.Join(versionTag, cliv1Filename)
-	fullPath, err := utils.FullPathInSnykCacheDir(cacheDir, relPath)
-	if err != nil {
-		return "", err
-	}
+	fullPath := path.Join(utils.GetVersionCacheDirectory(cacheDir, versionTag), cliv1Filename)
 	return fullPath, nil
 }
 

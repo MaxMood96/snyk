@@ -42,10 +42,18 @@ describe('snyk test --fail-on', () => {
       const project = await createProjectFromWorkspace('fail-on/' + workspace);
       server.setNextResponse(await project.read('vulns-result.json'));
 
-      const { code } = await runSnykCLI(`test --fail-on=${failOn}`, {
-        cwd: project.path(),
-        env,
-      });
+      // setting the "org" is a workaround to fix this test, the limitation of a single next response is actually the root cause because it requires the first request to be the test request.
+      const { code, stdout } = await runSnykCLI(
+        `test --fail-on=${failOn} --org=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee`,
+        {
+          cwd: project.path(),
+          env,
+        },
+      );
+
+      if (code != expectedCode) {
+        console.debug(stdout);
+      }
 
       expect(code).toEqual(expectedCode);
     },

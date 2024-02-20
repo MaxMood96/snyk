@@ -56,7 +56,7 @@ describe('snyk test --all-projects (mocked server only)', () => {
       '✗ 1/3 potential projects failed to get dependencies',
     );
     expect(stderr).toMatch(
-      `Dependency snyk was not found in yarn.lock. Your package.json and yarn.lock are probably out of sync. Please run "yarn install" and try again.`,
+      `Dependency snyk@1.320.0 was not found in yarn.lock. Your package.json and yarn.lock are probably out of sync. Please run "yarn install" and try again.`,
     );
   });
 
@@ -81,7 +81,7 @@ describe('snyk test --all-projects (mocked server only)', () => {
       '✗ 1/3 potential projects failed to get dependencies',
     );
     expect(stderr).toMatch(
-      `Dependency snyk was not found in yarn.lock. Your package.json and yarn.lock are probably out of sync. Please run "yarn install" and try again.`,
+      `Dependency snyk@1.320.0 was not found in yarn.lock. Your package.json and yarn.lock are probably out of sync. Please run "yarn install" and try again.`,
     );
   });
 
@@ -113,9 +113,7 @@ describe('snyk test --all-projects (mocked server only)', () => {
   test('`test ruby-app --all-projects`', async () => {
     const project = await createProjectFromWorkspace('ruby-app');
 
-    server.setDepGraphResponse(
-      await project.readJSON('test-graph-result.json'),
-    );
+    server.setCustomResponse(await project.readJSON('test-graph-result.json'));
 
     const { code, stdout, stderr } = await runSnykCLI('test --all-projects', {
       cwd: project.path(),
@@ -131,7 +129,7 @@ describe('snyk test --all-projects (mocked server only)', () => {
 
   test('`test ruby-app-thresholds --all-projects --ignore-policy`', async () => {
     const project = await createProjectFromWorkspace('ruby-app-thresholds');
-    server.setDepGraphResponse(
+    server.setCustomResponse(
       await project.readJSON('test-graph-result-medium-severity.json'),
     );
     const { code, stdout, stderr } = await runSnykCLI(
@@ -162,29 +160,27 @@ describe('snyk test --all-projects (mocked server only)', () => {
         env,
       },
     );
-    const backendRequests = server.popRequests(2);
-    expect(backendRequests).toHaveLength(2);
-    expect(backendRequests[0].method).toEqual('POST');
-    expect(backendRequests[0].headers['x-snyk-cli-version']).toBeDefined();
-    expect(backendRequests[0].url).toMatch('/api/v1/test-dep-graph');
-    expect(backendRequests[0].body.depGraph).not.toBeNull();
     const vulnerableFolderPath =
       process.platform === 'win32'
         ? 'vulnerable\\package-lock.json'
         : 'vulnerable/package-lock.json';
 
-    expect(backendRequests[1].method).toEqual('POST');
-    expect(backendRequests[1].headers['x-snyk-cli-version']).toBeDefined();
-    expect(backendRequests[1].url).toMatch('/api/v1/test-dep-graph');
-    expect(backendRequests[1].body.depGraph).not.toBeNull();
-    expect(backendRequests[1].body.depGraph.pkgManager.name).toBe('npm');
-    // local policy found and sent to backend
-    expect(backendRequests[1].body.policy).toMatch('npm:node-uuid:20160328');
-    expect(
-      backendRequests[1].body.targetFileRelativePath.endsWith(
-        vulnerableFolderPath,
-      ),
-    ).toBeTruthy();
+    const backendRequests = server.popRequests(2);
+    expect(backendRequests).toHaveLength(2);
+    let policyCount = 0;
+    backendRequests.forEach((req) => {
+      expect(req.method).toEqual('POST');
+      expect(req.headers['x-snyk-cli-version']).toBeDefined();
+      expect(req.url).toMatch('/api/v1/test-dep-graph');
+      expect(req.body.depGraph).not.toBeNull();
+      expect(req.body.depGraph.pkgManager.name).toBe('npm');
+      // local policy found and sent to backend
+      if (req.body.targetFileRelativePath.endsWith(vulnerableFolderPath)) {
+        expect(req.body.policy).toMatch('npm:node-uuid:20160328');
+        policyCount += 1;
+      }
+    });
+    expect(policyCount).toBe(1);
 
     expect(code).toEqual(0);
 

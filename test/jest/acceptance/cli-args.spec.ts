@@ -3,16 +3,14 @@ import { UnsupportedOptionCombinationError } from '../../../src/lib/errors/unsup
 import { runSnykCLI } from '../util/runSnykCLI';
 import { fakeServer } from '../../acceptance/fake-server';
 import { createProject } from '../util/createProject';
+import * as os from 'os';
 
-const isWindows =
-  require('os-name')()
-    .toLowerCase()
-    .indexOf('windows') === 0;
+const isWindows = os.platform().indexOf('win') === 0;
 
 jest.setTimeout(1000 * 60 * 5);
 
 describe('cli args', () => {
-  let server;
+  let server: ReturnType<typeof fakeServer>;
   let env: Record<string, string>;
 
   beforeAll((done) => {
@@ -39,6 +37,21 @@ describe('cli args', () => {
     server.close(() => {
       done();
     });
+  });
+
+  test('delimiting args should pass expected args to the command as expected', async () => {
+    const { stdout } = await runSnykCLI(
+      `-d woof --language=cat -- --hello --world`,
+      {
+        env,
+      },
+    );
+    const doubleDashArgsStart = stdout.indexOf('_doubleDashArgs:::');
+    const doubleDashArgsEnd = stdout.indexOf(':::_doubleDashArgs');
+    const doubleDashArgs = stdout.slice(doubleDashArgsStart, doubleDashArgsEnd);
+    expect(doubleDashArgs).toStrictEqual(
+      "_doubleDashArgs::: [ '--hello', '--world' ] ",
+    );
   });
 
   test('snyk test command should fail when --file is not specified correctly', async () => {
@@ -115,6 +128,19 @@ describe('cli args', () => {
     );
     expect(stdout).toMatch(
       'The following option combination is not currently supported: file + scan-all-unmanaged',
+    );
+    expect(code).toEqual(2);
+  });
+
+  test('snyk test --maven-aggregate-project --project-name=blah', async () => {
+    const { code, stdout } = await runSnykCLI(
+      `test --maven-aggregate-project --project-name=blah`,
+      {
+        env,
+      },
+    );
+    expect(stdout).toMatch(
+      'The following option combination is not currently supported: maven-aggregate-project + project-name',
     );
     expect(code).toEqual(2);
   });
@@ -219,9 +245,7 @@ describe('cli args', () => {
   });
 
   [
-    'auth',
     'config',
-    'help',
     'ignore',
     'modules',
     'monitor',
@@ -301,7 +325,7 @@ describe('cli args', () => {
   });
 
   test('iac test with flags not allowed with --sarif', async () => {
-    const { code, stdout } = await runSnykCLI(`test iac --sarif --json`, {
+    const { code, stdout } = await runSnykCLI(`iac test --sarif --json`, {
       env,
     });
     expect(stdout).toMatch(
@@ -312,10 +336,13 @@ describe('cli args', () => {
     expect(code).toEqual(2);
   });
 
-  test('iac container with flags not allowed with --sarif', async () => {
-    const { code, stdout } = await runSnykCLI(`test container --sarif --json`, {
-      env,
-    });
+  test('container test with flags not allowed with --sarif', async () => {
+    const { code, stdout } = await runSnykCLI(
+      `container test  --sarif --json`,
+      {
+        env,
+      },
+    );
     expect(stdout).toMatch(
       new UnsupportedOptionCombinationError(['test', 'sarif', 'json'])
         .userMessage,

@@ -87,7 +87,7 @@ export const GenericTests: AcceptanceTests = {
         });
         t.fail('expect to err');
       } catch (err) {
-        t.has(
+        t.match(
           err.jsonStringifiedResults,
           'Org missing-org was not found or you may not have the correct permissions',
           'got correct err message',
@@ -362,7 +362,7 @@ export const GenericTests: AcceptanceTests = {
           await params.cli.test('npm-package');
           tt.fail('should fail');
         } catch (e) {
-          tt.false(
+          tt.notOk(
             (requestStub.firstCall.args[3] as any).rejectUnauthorized,
             'rejectUnauthorized false',
           );
@@ -405,7 +405,7 @@ export const GenericTests: AcceptanceTests = {
     'error 500 handling': (params, utils) => async (t) => {
       utils.chdirWorkspaces();
 
-      params.server.setNextStatusCode(500);
+      params.server.setStatusCode(500);
 
       try {
         await params.cli.test('ruby-app-thresholds');

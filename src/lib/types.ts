@@ -87,6 +87,39 @@ export interface Options {
   report?: boolean;
   'var-file'?: string;
   'target-name'?: string;
+  // Used only with the Code (SAST) plugin. Allows running tests with reporting for existing projects.
+  'project-id'?: string;
+  'commit-id'?: string;
+
+  // Policy
+  'ignore-policy'?: boolean; // used in snyk/policy lib
+  'trust-policies'?: boolean; // used in snyk/policy lib
+  'policy-path'?: string;
+  loose?: boolean;
+
+  // DescribeOptions
+  kind?: string;
+  filter?: string;
+  to?: string;
+  'fetch-tfstate-headers'?: string;
+  'tfc-token'?: string;
+  'tfc-endpoint'?: string;
+  'tf-provider-version'?: string;
+  strict?: true;
+  driftignore?: string;
+  'tf-lockfile'?: string;
+  'config-dir'?: string;
+  html?: boolean;
+  'html-file-output'?: string;
+  service?: string;
+  from?: string; // snyk cli args parsing does not support variadic args so this will be coma separated values
+  ignore?: string[];
+
+  id?: string;
+
+  // GenDriftIgnoreOptions
+  'exclude-missing'?: boolean;
+  'exclude-unmanaged'?: boolean;
 }
 
 // TODO(kyegupov): catch accessing ['undefined-properties'] via noImplicitAny

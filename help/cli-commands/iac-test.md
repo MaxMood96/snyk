@@ -10,15 +10,15 @@ The `snyk iac test` command tests for any known security issue.
 
 For a list of related commands see the [snyk iac](iac.md) help; `iac --help`
 
-For more information see [Snyk CLI for Infrastructure as Code](https://docs.snyk.io/products/snyk-infrastructure-as-code/snyk-cli-for-infrastructure-as-code)
+For more information see [Snyk CLI for IaC](https://docs.snyk.io/snyk-cli/scan-and-maintain-projects-using-the-cli/snyk-cli-for-iac)
 
 ## Exit codes
 
 Possible exit codes and their meaning:
 
-**0**: success, no vulnerabilities found\
-**1**: action_needed, vulnerabilities found\
-**2**: failure, try to re-run command\
+**0**: success (scan completed), no vulnerabilities found\
+**1**: action_needed (scan completed), vulnerabilities found\
+**2**: failure, try to re-run the command. Use `-d` to output the debug logs.\
 **3**: failure, no supported projects detected
 
 ## Configure the Snyk CLI
@@ -33,7 +33,7 @@ Use the `-d` option to output the debug logs.
 
 ### `--detection-depth=<DEPTH>`
 
-Use to indicate how many subdirectories to search. `DEPTH` must be a number, 1 or greater; zero (0) is the current directory.
+Indicate how many subdirectories to search. `DEPTH` must be a number, 1 or greater; zero (0) is the current directory.
 
 Default: no limit.
 
@@ -41,23 +41,21 @@ Example: `--detection-depth=3` limits search to the specified directory (or the 
 
 ### `--org=<ORG_ID>`
 
-Specify the `<ORG_ID>` to run Snyk commands tied to a specific organization. The `<ORG_ID>` influences private test limits.
+Specify the `<ORG_ID>` to run Snyk commands tied to a specific Snyk Organization. The `<ORG_ID>` influences private test limits.
 
-If you have multiple organizations, you can set a default from the CLI using:
+If you have multiple Organizations, you can set a default from the CLI using:
 
 `$ snyk config set org=<ORG_ID>`
 
-Set a default to ensure all newly tested projects are tested under your default organization. If you need to override the default, use the `--org=<ORG_ID>` option.
+Set a default to ensure all newly tested projects are tested under your default Organization. If you need to override the default, use the `--org=<ORG_ID>` option.
 
-Default: `<ORG_ID>` that is the current preferred organization in your [Account settings](https://app.snyk.io/account)
+Default: `<ORG_ID>` that is the current preferred Organization in your [Account settings](https://app.snyk.io/account)
 
-Note that you can also use `--org=<orgslugname>`. The `ORG_ID` works in both the CLI and the API. The organization slug name works in the CLI, but not in the API.
-
-For more information see the article [How to select the organization to use in the CLI](https://support.snyk.io/hc/en-us/articles/360000920738-How-to-select-the-organization-to-use-in-the-CLI)
+Note that you can also use `--org=<orgslugname>`. The `ORG_ID` works in both the CLI and the API. The Organization slug name works in the CLI, but not in the API.
 
 ### `--ignore-policy`
 
-Ignore all set policies, the current policy in the `.snyk` file, org level ignores, and the project policy on snyk.io.
+Ignore all set policies, the current policy in the `.snyk` file, rg level ignores, and the project policy on snyk.io.
 
 ### `--policy-path=<PATH_TO_POLICY_FILE>`
 
@@ -73,7 +71,7 @@ Example: `$ snyk iac test --json`
 
 Save test output as a JSON data structure directly to the specified file, regardless of whether or not you use the `--json` option.
 
-Use to display the human-readable test output using stdout and at the same time save the JSON data structure output to a file. If no issues are found, an output file is not created.
+Use to display the human-readable test output using stdout and at the same time save the JSON data structure output to a file.
 
 Example: `$ snyk iac test --json-file-output=vuln.json`
 
@@ -97,9 +95,9 @@ Set the project business criticality project attribute to one or more values (co
 
 Allowed values: `critical, high, medium, low`
 
-For more information see [Project attributes](https://docs.snyk.io/getting-started/introduction-to-snyk-projects/view-project-information/project-attributes)
+For more information see Project attributes
 
-This option is not supported for Integrated IaC (Limited Availability).
+This option is not supported for IaC+.
 
 ### `--project-environment=<ENVIRONMENT>[,<ENVIRONMENT>]...>`
 
@@ -109,9 +107,9 @@ Set the project environment project attribute to one or more values (comma-separ
 
 Allowed values: `frontend`, `backend`, `internal`, `external`, `mobile`, `saas`, `onprem`, `hosted`, `distributed`
 
-For more information see [Project attributes](https://docs.snyk.io/getting-started/introduction-to-snyk-projects/view-project-information/project-attributes)
+For more information see [Project attributes](https://docs.snyk.io/manage-issues/introduction-to-snyk-projects/project-attributes)
 
-This option is not supported for Integrated IaC (Limited Availability).
+This option is not supported for IaC+.
 
 ### `--project-lifecycle=<LIFECYCLE>[,<LIFECYCLE>]...>`
 
@@ -121,9 +119,9 @@ Set the project lifecycle project attribute to one or more values (comma-separat
 
 Allowed values: `production`, `development`, `sandbox`
 
-For more information see [Project attributes](https://docs.snyk.io/getting-started/introduction-to-snyk-projects/view-project-information/project-attributes)
+For more information see [Project attributes](https://docs.snyk.io/manage-issues/introduction-to-snyk-projects/project-attributes)
 
-This option is not supported for Integrated IaC (Limited Availability).
+This option is not supported for IaC+.
 
 ### `--project-tags=<TAG>[,<TAG>]...>`
 
@@ -135,19 +133,25 @@ Example: `--project-tags=department=finance,team=alpha`
 
 To clear the project tags set `--project-tags=`
 
-This option is not supported for Integrated IaC (Limited Availability).
+This option is not supported for IaC+.
+
+For more information including allowable characters see [Project tags](https://docs.snyk.io/manage-issues/introduction-to-snyk-projects/project-tags)
 
 ### `--remote-repo-url=<URL>`
 
-This can be used in combination with the `--report` option.
+Set or override the remote URL for the repository.
 
-Set or override the remote URL for the repository.&#x20;
+Groups all Projects found under a single Target.
+
+Can be used in combination with the `--report` option.
 
 ### `--report`
 
 **NEW** option: Share results with the Snyk Web UI.
 
-This creates a project in your Snyk account with a snapshot of the current configuration issues. After using this option, log in to the Snyk website and view your projects to see the monitor.
+This creates a project in your Snyk account with a snapshot of the current configuration issues or appends the snapshot to an existing project.
+
+After using this option, log in to the Snyk website and view your projects to see the snapshot.
 
 Example: `$ snyk iac test --report`
 
@@ -165,7 +169,7 @@ Example: Scan the configuration files using custom rules and internal Snyk rules
 
 Note: This option can not be used in combination with the `--report` option.
 
-This option is not supported for Integrated IaC (Limited Availability).
+This option is not supported for IaC+.
 
 ### `--severity-threshold=<low|medium|high|critical>`
 
@@ -182,7 +186,7 @@ Example 2: `--scan=resource-changes` (proposed changes scan)
 
 This can be used in combination with the `--report` option.
 
-Set or override the project name for the repository.&#x20;
+Set or override the project name for the repository.
 
 Note: This option supersedes`--remote-repo-url`, if both options are used together.
 
@@ -190,28 +194,37 @@ Note: This option supersedes`--remote-repo-url`, if both options are used togeth
 
 This can be used in combination with the `--report` option.
 
-Specify a reference which differentiates this project, for example, a branch name or version. Projects having the same reference can be grouped based on that reference.
+Specify a reference that differentiates this project, for example, a branch name or version. Projects having the same reference can be grouped based on that reference.
 
 Example, setting to the current Git branch:
 
 `snyk iac test myproject/ --report --target-reference="$(git branch --show-current)"`
 
-\
 Example, setting to the latest Git tag:
 
 `snyk iac test myproject/ --report --target-reference="$(git describe --tags --abbrev=0)"`
 
 ### `--var-file=<PATH_TO_VARIABLE_FILE>`
 
-Use this option to load a terraform variable definitions file that is located in a different directory from the scanned one.
+Load a terraform variable definitions file that is located in a different directory from the scanned one.
 
 Example:
 
 `$ snyk iac test myproject/staging/networking --var-file=myproject/vars.tf`
 
+### `--snyk-cloud-environment=<ENVIRONMENT_ID>`
+
+Use the last scan from your Snyk Cloud Environment to suppress issues. For more information, see [Adding cloud context to your IaC test](https://docs.snyk.io/scan-cloud-deployment/snyk-infrastructure-as-code/integrated-infrastructure-as-code/adding-cloud-context-to-your-iac-test)
+
+This option is only supported for IaC+.
+
+Example:
+
+`$ snyk iac test --snyk-cloud-environment=0d19dc1a-c2aa-4719-89ee-5f281dd92a20`
+
 ## Examples for snyk iac test command
 
-For more information see [Snyk CLI for Infrastructure as Code](https://docs.snyk.io/products/snyk-infrastructure-as-code/snyk-cli-for-infrastructure-as-code)
+For more information see [Snyk CLI for Infrastructure as Code](https://docs.snyk.io/scan-cloud-deployment/snyk-infrastructure-as-code/snyk-cli-for-infrastructure-as-code)
 
 ### Test a CloudFormation file
 

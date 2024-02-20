@@ -29,11 +29,14 @@ import {
   NoSupportedSastFiles,
 } from '../lib/errors';
 import { IaCErrorCodes } from './commands/test/iac/local-execution/types';
-import stripAnsi from 'strip-ansi';
+import stripAnsi = require('strip-ansi');
 import { ExcludeFlagInvalidInputError } from '../lib/errors/exclude-flag-invalid-input';
 import { modeValidation } from './modes';
 import { JsonFileOutputBadInputError } from '../lib/errors/json-file-output-bad-input-error';
-import { saveJsonToFileCreatingDirectoryIfRequired } from '../lib/json-file-output';
+import {
+  saveObjectToFile,
+  saveJsonToFileCreatingDirectoryIfRequired,
+} from '../lib/json-file-output';
 import {
   Options,
   TestOptions,
@@ -44,6 +47,7 @@ import { SarifFileOutputEmptyError } from '../lib/errors/empty-sarif-output-erro
 import { InvalidDetectionDepthValue } from '../lib/errors/invalid-detection-depth-value';
 import { obfuscateArgs } from '../lib/utils';
 import { EXIT_CODES } from './exit-codes';
+const isEmpty = require('lodash/isEmpty');
 
 const debug = Debug('snyk');
 
@@ -74,7 +78,8 @@ async function runCommand(args: Args) {
   // also save the json (in error.json) to file if option is set
   if (args.command === 'test') {
     const jsonResults = (commandResult as TestCommandResult).getJsonResult();
-    await saveResultsToFile(args.options, 'json', jsonResults);
+    const jsonPayload = (commandResult as TestCommandResult).getJsonData();
+    await saveResultsToFile(args.options, 'json', jsonResults, jsonPayload);
     const sarifResults = (commandResult as TestCommandResult).getSarifResult();
     await saveResultsToFile(args.options, 'sarif', sarifResults);
   }
@@ -96,23 +101,37 @@ async function handleError(args, error) {
   let command = 'bad-command';
   let exitCode = EXIT_CODES.ERROR;
 
-  const noSupportedManifestsFound = error.message?.includes(
-    'Could not detect supported target files in',
-  );
-  const noSupportedSastFiles = error instanceof NoSupportedSastFiles;
-  const noSupportedIaCFiles = error.code === IaCErrorCodes.NoFilesToScanError;
-  const noSupportedProjectsDetected =
-    noSupportedManifestsFound || noSupportedSastFiles || noSupportedIaCFiles;
-
-  if (noSupportedProjectsDetected) {
-    exitCode = EXIT_CODES.NO_SUPPORTED_PROJECTS_DETECTED;
+  // If Snyk CLI is running in CI mode (SNYK_CI=1), differentiate authorization
+  if (process.env.SNYK_CI === '1') {
+    if (error.code === 401 || error.code === 403) {
+      exitCode = EXIT_CODES.EX_NOPERM;
+    } else if (error.code >= 400 && error.code < 500) {
+      exitCode = EXIT_CODES.EX_UNAVAILABLE;
+    }
   }
 
   const vulnsFound = error.code === 'VULNS';
-  if (vulnsFound) {
-    // this isn't a bad command, so we won't record it as such
-    command = args.command;
-    exitCode = EXIT_CODES.VULNS_FOUND;
+
+  if (args.command === 'test' && args.options?.unmanaged) {
+    exitCode = vulnsFound ? EXIT_CODES.VULNS_FOUND : error.code;
+  } else {
+    const noSupportedManifestsFound = error.message?.includes(
+      'Could not detect supported target files in',
+    );
+    const noSupportedSastFiles = error instanceof NoSupportedSastFiles;
+    const noSupportedIaCFiles = error.code === IaCErrorCodes.NoFilesToScanError;
+    const noSupportedProjectsDetected =
+      noSupportedManifestsFound || noSupportedSastFiles || noSupportedIaCFiles;
+
+    if (noSupportedProjectsDetected) {
+      exitCode = EXIT_CODES.NO_SUPPORTED_PROJECTS_DETECTED;
+    }
+
+    if (vulnsFound) {
+      // this isn't a bad command, so we won't record it as such
+      command = args.command;
+      exitCode = EXIT_CODES.VULNS_FOUND;
+    }
   }
 
   if (args.options.debug && !args.options.json) {
@@ -143,7 +162,13 @@ async function handleError(args, error) {
     }
   }
 
-  await saveResultsToFile(args.options, 'json', error.jsonStringifiedResults);
+  if (error.jsonPayload) {
+    // send raw jsonPayload instead of stringified payload
+    await saveResultsToFile(args.options, 'json', '', error.jsonPayload);
+  } else {
+    // fallback to original behaviour
+    await saveResultsToFile(args.options, 'json', error.jsonStringifiedResults);
+  }
   await saveResultsToFile(args.options, 'sarif', error.sarifStringifiedResults);
 
   const analyticsError = vulnsFound
@@ -194,6 +219,7 @@ function getFullPath(filepathFragment: string): string {
 async function saveJsonResultsToFile(
   stringifiedJson: string,
   jsonOutputFile: string,
+  jsonPayload?: Record<string, unknown>,
 ) {
   if (!jsonOutputFile) {
     console.error('empty jsonOutputFile');
@@ -205,10 +231,15 @@ async function saveJsonResultsToFile(
     return;
   }
 
-  await saveJsonToFileCreatingDirectoryIfRequired(
-    jsonOutputFile,
-    stringifiedJson,
-  );
+  // save to file with jsonPayload object instead of stringifiedJson
+  if (jsonPayload && !isEmpty(jsonPayload)) {
+    await saveObjectToFile(jsonOutputFile, jsonPayload);
+  } else {
+    await saveJsonToFileCreatingDirectoryIfRequired(
+      jsonOutputFile,
+      stringifiedJson,
+    );
+  }
 }
 
 function checkRuntime() {
@@ -244,6 +275,7 @@ export async function main(): Promise<void> {
         '--group-issues is currently not supported for Snyk IaC.',
       ]);
     }
+
     if (
       globalArgs.options['group-issues'] &&
       !globalArgs.options['json'] &&
@@ -251,6 +283,16 @@ export async function main(): Promise<void> {
     ) {
       throw new UnsupportedOptionCombinationError([
         'JSON output is required to use --group-issues, try adding --json.',
+      ]);
+    }
+
+    if (
+      globalArgs.options['mavenAggregateProject'] &&
+      globalArgs.options['project-name']
+    ) {
+      throw new UnsupportedOptionCombinationError([
+        'maven-aggregate-project',
+        'project-name',
       ]);
     }
 
@@ -407,35 +449,24 @@ function validateUnsupportedSarifCombinations(args) {
       'sarif-file-output',
     ]);
   }
-
-  if (
-    args.options['sarif'] &&
-    args.options['docker'] &&
-    !args.options['file']
-  ) {
-    throw new MissingOptionError('sarif', ['--file']);
-  }
-
-  if (
-    args.options['sarif-file-output'] &&
-    args.options['docker'] &&
-    !args.options['file']
-  ) {
-    throw new MissingOptionError('sarif-file-output', ['--file']);
-  }
 }
 
 async function saveResultsToFile(
   options: ArgsOptions,
   outputType: string,
   jsonResults: string,
+  jsonPayload?: Record<string, unknown>,
 ) {
   const flag = `${outputType}-file-output`;
   const outputFile = options[flag];
-  if (outputFile && jsonResults) {
+  if (outputFile && (jsonResults || !isEmpty(jsonPayload))) {
     const outputFileStr = outputFile as string;
     const fullOutputFilePath = getFullPath(outputFileStr);
-    await saveJsonResultsToFile(stripAnsi(jsonResults), fullOutputFilePath);
+    await saveJsonResultsToFile(
+      stripAnsi(jsonResults),
+      fullOutputFilePath,
+      jsonPayload,
+    );
   }
 }
 

@@ -6,7 +6,8 @@ on:
   release:
     types: [published]
   schedule:
-    - cron: '0 * * * *'
+    - cron: '0 23 * * *'
+  workflow_dispatch:
 
 jobs:
   smoke_test:
@@ -16,8 +17,8 @@ jobs:
       fail-fast: false # we care about other platforms and channels building
       matrix:
         os: [ubuntu, macos, windows]
-        snyk_install_method: [binary, npm, yarn]
-        node_version: [12, 14, 16]
+        snyk_install_method: [binary, npm, yarn, brew]
+        node_version: [14, 16, 18]
         exclude:
           # Skip yarn for Windows, as it's a bit crazy to get it working in CI environment. Unless we see evidence we need it, I'd avoid it
           - snyk_install_method: yarn
@@ -27,6 +28,11 @@ jobs:
             node_version: 12
           - snyk_install_method: binary
             node_version: 16
+          # No need to run brew tests on some Platforms
+          - snyk_install_method: brew
+            os: ubuntu
+          - snyk_install_method: brew
+            os: windows
         include:
           - snyk_install_method: binary
             os: ubuntu
@@ -34,16 +40,16 @@ jobs:
           - snyk_install_method: binary
             os: macos
             snyk_cli_dl_file: snyk-macos
-          # Homebrew installation
-          - snyk_install_method: brew
-            os: macos
           - snyk_install_method: alpine-binary
             os: ubuntu
+            node_version: 16
             snyk_cli_dl_file: snyk-alpine
           - snyk_install_method: npm-root-user
             os: ubuntu
+            node_version: 16
           - snyk_install_method: docker-bundle
             os: macos
+            node_version: 16
             snyk_cli_dl_file: snyk-for-docker-desktop-darwin-x64.tar.gz
 
     steps:
@@ -78,14 +84,15 @@ jobs:
       - name: Run alpine test
         if: ${{ matrix.snyk_install_method == 'alpine-binary' }}
         env:
-          SMOKE_TESTS_SNYK_TOKEN: ${{ secrets.SMOKE_TESTS_SNYK_TOKEN }}
+          TEST_SNYK_TOKEN: ${{ secrets.TEST_SNYK_TOKEN }}
+          TEST_SNYK_API: ${{ secrets.TEST_SNYK_API }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           docker build -t snyk-cli-alpine -f ./test/smoke/alpine/Dockerfile ./test
-          docker run -eCI=1 -eSMOKE_TESTS_SNYK_TOKEN -eGITHUB_TOKEN snyk-cli-alpine
+          docker run -eCI=1 -eTEST_SNYK_TOKEN -eGITHUB_TOKEN -eTEST_SNYK_API snyk-cli-alpine
 
       - name: Install snyk from Docker bundle
-        if: ${{ matrix.snyk_install_method == 'docker-bundle' }}
+        if: ${{ matrix.snyk_install_method == 'docker-bundle' && matrix.os == 'macos' }}
         run: |
           pushd "$(mktemp -d)"
           curl 'https://static.snyk.io/cli/latest/${{ matrix.snyk_cli_dl_file }}' | tar -xz
@@ -102,10 +109,11 @@ jobs:
       - name: Run npm test with Root user
         if: ${{ matrix.snyk_install_method == 'npm-root-user' }}
         env:
-          SMOKE_TESTS_SNYK_TOKEN: ${{ secrets.SMOKE_TESTS_SNYK_TOKEN }}
+          TEST_SNYK_TOKEN: ${{ secrets.TEST_SNYK_TOKEN }}
+          TEST_SNYK_API: ${{ secrets.TEST_SNYK_API }}
         run: |
           docker build -t snyk-docker-root -f ./test/smoke/docker-root/Dockerfile ./test
-          docker run -eCI=1 -eSMOKE_TESTS_SNYK_TOKEN snyk-docker-root
+          docker run -eCI=1 -eTEST_SNYK_TOKEN -eTEST_SNYK_API snyk-docker-root
 
       - name: Install Snyk with binary - Non-Windows
         if: ${{ matrix.snyk_install_method == 'binary' && matrix.os != 'windows' }}
@@ -145,7 +153,7 @@ jobs:
           brew install jq
 
       - name: Install Snyk CLI with homebrew on macOS
-        if: ${{ matrix.snyk_install_method == 'brew' }}
+        if: ${{ matrix.snyk_install_method == 'brew' && matrix.os == 'macos'}}
         run: |
           brew tap snyk/tap
           brew install snyk
@@ -175,17 +183,19 @@ jobs:
         working-directory: test/smoke
         shell: bash -l {0} # run bash with --login flag to load .bash_profile that's used by yarn install method
         env:
-          SMOKE_TESTS_SNYK_TOKEN: ${{ secrets.SMOKE_TESTS_SNYK_TOKEN }}
+          TEST_SNYK_TOKEN: ${{ secrets.TEST_SNYK_TOKEN }}
+          TEST_SNYK_API: ${{ secrets.TEST_SNYK_API }}
         run: |
           which snyk
           snyk version
-          shellspec -f d --skip-message quiet
+          shellspec -f d --skip-message quiet --no-warning-as-failure
 
       - name: Run shellspec tests - Windows
         if: ${{ matrix.os == 'windows' }}
         working-directory: test/smoke
         shell: powershell
         env:
-          SMOKE_TESTS_SNYK_TOKEN: ${{ secrets.SMOKE_TESTS_SNYK_TOKEN }}
+          TEST_SNYK_TOKEN: ${{ secrets.TEST_SNYK_TOKEN }}
+          TEST_SNYK_API: ${{ secrets.TEST_SNYK_API }}
         run: |
           sh ./run-shellspec-win.sh

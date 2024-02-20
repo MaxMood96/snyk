@@ -2,13 +2,12 @@ import {
   trackUsage,
   TestLimitReachedError,
 } from '../../../../src/cli/commands/test/iac/local-execution/usage-tracking';
-import { mocked } from 'ts-jest/utils';
 import { NeedleResponse } from 'needle';
 import { makeRequest } from '../../../../src/lib/request/request';
 import { CustomError } from '../../../../src/lib/errors';
 
 jest.mock('../../../../src/lib/request/request');
-const mockedMakeRequest = mocked(makeRequest);
+const mockedMakeRequest = jest.mocked(makeRequest);
 
 const results = [
   {
@@ -29,6 +28,8 @@ const results = [
   },
 ];
 
+const org = 'test-org';
+
 describe('tracking IaC test usage', () => {
   afterEach(() => {
     jest.clearAllMocks();
@@ -44,9 +45,10 @@ describe('tracking IaC test usage', () => {
       });
     });
 
-    await trackUsage(results);
+    await trackUsage(results, org);
 
     expect(mockedMakeRequest.mock.calls.length).toEqual(1);
+    expect(mockedMakeRequest.mock.calls[0][0].qs).toEqual({ org });
     expect(mockedMakeRequest.mock.calls[0][0].body).toEqual({
       results: [
         {
@@ -71,7 +73,7 @@ describe('tracking IaC test usage', () => {
       });
     });
 
-    await expect(trackUsage(results)).rejects.toThrow(
+    await expect(trackUsage(results, org)).rejects.toThrow(
       new TestLimitReachedError(),
     );
   });
@@ -86,7 +88,7 @@ describe('tracking IaC test usage', () => {
       });
     });
 
-    await expect(trackUsage(results)).rejects.toThrow(
+    await expect(trackUsage(results, org)).rejects.toThrow(
       new CustomError(
         'An error occurred while attempting to track test usage: {"foo":"bar"}',
       ),
